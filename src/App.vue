@@ -1,0 +1,2046 @@
+<script setup>
+import { ref, computed, onMounted, watch, nextTick } from 'vue'
+
+// --- State ---
+const isAppLoading = ref(true)
+const preventUnmount = ref(true)
+const currentPage = ref('home')
+const isCartOpen = ref(false)
+const activeCategory = ref('All')
+const selectedFood = ref(null)
+const tempQuantity = ref(1)
+const activeMobileTab = ref('hero')
+
+// Form states
+const checkoutForm = ref({
+  name: '',
+  phone: '',
+  address: '',
+  paymentMethod: 'qris'
+})
+const orderId = ref('')
+
+// --- Data ---
+const categories = ['All', 'Main Course', 'Snacks', 'Drinks']
+
+const menu = ref([
+  //main course
+  { id: 1, name: 'Rice Bowl Chicken Popcorn', desc: 'Nasi hangat dengan ayam popcorn yang gurih dan saus pilihan.', price: 15000, category: 'Main Course', popular: true, img: '/maincourse/ricebowl.png' },
+  { id: 3, name: 'Fried Dimsum', desc: 'Dimsum goreng dengan isian daging ayam dan udang yang juicy gurih dan lezat dan juga keju didalam yang lumer.', price: 7000, category: 'Main Course', popular: false, img: '/maincourse/dimsum.png' },
+  { id: 2, name: 'Kimbab', desc: 'Gulungan nasi dengan isian segar seperti timun, wortel, crabstick, dan selada hijau, menghadirkan perpaduan rasa ringan, gurih, dan menyegarkan di setiap gigitan.', price: 12000, category: 'Main Course', popular: true, img: '/maincourse/kimbab.png' },
+  
+  //drinks
+  { id: 4, name: 'Brazilian Lemonade', desc: 'Minuman segar dengan rasa lemon yang khas dan menyegarkan.', price: 8000, category: 'Drinks', popular: true, img: '/drinks/brazilianlemonade.png' },
+
+  //snacks
+  { id: 5, name: 'Makaroni Kering', desc: 'Cemilan gurih dan renyah dengan bumbu pilihan yang bikin nagih di setiap gigitan.', price: 8000, category: 'Snacks', popular: true, img: '/snacks/makaroni.png' },
+  { id: 6, name: 'Jagung (marning)', desc: 'Jagung kering yang digoreng renyah dengan rasa gurih khas yang simpel tapi addictive.', price: 8000, category: 'Snacks', popular: false, img: '/snacks/jagung.png' },
+  { id: 7, name: 'Basreng', desc: 'Bakso goreng dengan tekstur kriuk dan bumbu pedas gurih yang kuat.', price: 8000, category: 'Snacks', popular: false, img: '/snacks/basreng.png' },
+  { id: 8, name: 'Keripik Pisang', desc: 'Irisan pisang tipis yang digoreng renyah dengan rasa manis alami dan ringan.', price: 8000, category: 'Snacks', popular: false, img: '/snacks/keripikpisanng.png' },
+  {  id: 9, name: 'Kuping Gajah', desc: 'Cemilan tradisional renyah dengan perpaduan rasa manis dan gurih yang khas.', price: 8000, category: 'Snacks', popular: false, img: '/snacks/kupinggajah.png'},
+  { id: 10, name: 'Jasuke', desc: 'Jagung susu keju dengan rasa manis dan gurih yang khas.', price: 7000, category: 'Snacks', popular: false, img: '/snacks/jasuke.png'}
+])
+
+const bundles = ref([
+  { id: 101, name: 'Paket Ngampus', desc: 'Rice bowl + Brazilian Lemonade', price: 20000, oldPrice: 23000, img: '/bundling/paketngampus.png' },
+  { id: 102, name: 'Paket Jajan', desc: 'Dimsum Goreng Keju + Brazilian Lemonade', price: 21000, oldPrice: 23000, img: '/bundling/paketjajn.png' },
+  { id: 103, name: 'Paket Nyemil', desc: 'Jagung Susu Keju + Brazilian Lemonade', price: 13000, oldPrice: 15000, img: '/bundling/paketnyemil.png'},
+  { id: 104, name: 'Paket Kenyang', desc: 'Rice Bowl + Dimsum Goreng Keju + Jagung Susu Keju', price: 33000, oldPrice: 37000, img: '/bundling/paketnongkrongbareng.png'},
+  { id: 105, name: 'Paket Traktir', desc: 'Rice Bowl + Dimsum Goreng Keju + Jagung Susu Keju + Brazilian Lemonade', price: 40000, oldPrice: 45000, img: '/bundling/pakettraktir.jpg'}
+])
+
+const cart = ref([])
+
+// --- Computeds ---
+const filteredMenu = computed(() => {
+  if (activeCategory.value === 'All') {
+    return menu.value.filter(item => item.popular)
+  }
+  return menu.value.filter(item => item.category === activeCategory.value)
+})
+
+const categorizedMenu = computed(() => {
+  return {
+    'Main Course': menu.value.filter(i => i.category === 'Main Course'),
+    'Snacks': menu.value.filter(i => i.category === 'Snacks'),
+    'Drinks': menu.value.filter(i => i.category === 'Drinks')
+  }
+})
+
+const cartTotal = computed(() => {
+  return cart.value.reduce((total, item) => total + (item.price * item.quantity), 0)
+})
+
+const formatPrice = (price) => {
+  return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(price)
+}
+
+// --- Methods ---
+const openFoodDetail = (item) => {
+  selectedFood.value = item
+  tempQuantity.value = 1
+}
+
+const changeTempQuantity = (delta) => {
+  if (tempQuantity.value + delta >= 1) {
+    tempQuantity.value += delta
+  }
+}
+
+const addSelectedToCart = () => {
+  if (!selectedFood.value) return
+  
+  const existing = cart.value.find(i => i.id === selectedFood.value.id)
+  if (existing) {
+    existing.quantity += tempQuantity.value
+  } else {
+    cart.value.push({ ...selectedFood.value, quantity: tempQuantity.value })
+  }
+  selectedFood.value = null // close modal
+}
+
+const addDirectToCart = (item) => {
+  const existing = cart.value.find(i => i.id === item.id)
+  if (existing) {
+    existing.quantity += 1
+  } else {
+    cart.value.push({ ...item, quantity: 1 })
+  }
+}
+
+const updateQuantity = (item, delta) => {
+  const existing = cart.value.find(i => i.id === item.id)
+  if (existing) {
+    existing.quantity += delta
+    if (existing.quantity <= 0) {
+      cart.value = cart.value.filter(i => i.id !== item.id)
+    }
+  }
+}
+
+const navigateTo = (page) => {
+  currentPage.value = page
+  isCartOpen.value = false
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+const proceedToCheckout = () => {
+  if (cart.value.length === 0) return
+  navigateTo('checkout')
+}
+
+const processPayment = () => {
+  if (!checkoutForm.value.name || !checkoutForm.value.address) {
+    alert("Mohon lengkapi data pengiriman Anda.")
+    return
+  }
+  
+  // Generate random order ID
+  orderId.value = 'ORD-' + Math.floor(100000 + Math.random() * 900000)
+  navigateTo('invoice')
+}
+
+const processWhatsAppOrder = () => {
+  let text = `Halo IT's Food Time! Saya ingin memesan:\n\n`
+  text += `*Order ID:* ${orderId.value}\n`
+  text += `*Nama:* ${checkoutForm.value.name}\n`
+  text += `*No HP:* ${checkoutForm.value.phone}\n`
+  text += `*Alamat Pengiriman:* ${checkoutForm.value.address}\n`
+  text += `*Metode Pembayaran:* ${checkoutForm.value.paymentMethod.toUpperCase()}\n\n`
+  text += `*Detail Pesanan:*\n`
+  
+  cart.value.forEach(item => {
+    text += `- ${item.name} (${item.quantity}x) : ${formatPrice(item.price * item.quantity)}\n`
+  })
+  
+  text += `\n*TOTAL PEMBAYARAN: ${formatPrice(cartTotal.value)}*`
+  
+  const phone = '6281234567890'
+  const url = `https://wa.me/${phone}?text=${encodeURIComponent(text)}`
+  window.open(url, '_blank')
+  
+  // Clear cart after checkout
+  cart.value = []
+}
+
+const scrollToSection = (id) => {
+  if (currentPage.value !== 'home') {
+    currentPage.value = 'home'
+    nextTick(() => {
+      setTimeout(() => {
+        const el = document.getElementById(id)
+        if (el) el.scrollIntoView({ behavior: 'smooth' })
+        activeMobileTab.value = id
+      }, 300)
+    })
+  } else {
+    const el = document.getElementById(id)
+    if (el) el.scrollIntoView({ behavior: 'smooth' })
+    activeMobileTab.value = id
+  }
+}
+
+// --- Lifecycle & Scroll Tracking ---
+let scrollObserver = null
+
+const initScrollObserver = () => {
+  if (scrollObserver) scrollObserver.disconnect()
+  
+  scrollObserver = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        activeMobileTab.value = entry.target.id
+      }
+    })
+  }, { 
+    threshold: [0.1, 0.3, 0.5],
+    rootMargin: "-20% 0px -20% 0px" 
+  })
+
+  // Observe all possible landing sections
+  const sections = ['hero', 'menu', 'bundles']
+  sections.forEach(id => {
+    const el = document.getElementById(id)
+    if (el) scrollObserver.observe(el)
+  })
+}
+
+// Re-observe when returning to home because v-if destroys DOM elements
+watch(currentPage, (newPage) => {
+  if (newPage === 'home') {
+    nextTick(() => {
+      initScrollObserver()
+    })
+  } else {
+    // When on other pages, we can clear the scroll tab if needed, 
+    // or let it be handled by the icon active class logic
+    activeMobileTab.value = ''
+  }
+})
+
+onMounted(() => {
+  setTimeout(() => {
+    isAppLoading.value = false
+    setTimeout(() => {
+      preventUnmount.value = false
+      if (currentPage.value === 'home') {
+        initScrollObserver()
+      }
+    }, 100) 
+  }, 2300)
+})
+</script>
+
+<template>
+  <div>
+    <!-- ENTRY ANIMATION LOADING SCREEN -->
+    <div class="modern-loader" :class="{ 'slide-up-exit': !isAppLoading }" v-if="preventUnmount">
+      <div class="loader-content">
+        <div class="loader-text-mask">
+          <span class="loader-text">IT's <span class="text-blue">Food Time</span></span>
+        </div>
+        <div class="loader-line-wrapper">
+          <div class="loader-line"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- MAIN APP CONTENT (Fade up entry logic handled securely) -->
+    <div class="app-container" :class="{ 'mounted': !isAppLoading }" v-show="!preventUnmount || !isAppLoading">
+      
+      <!-- HEADER -->
+      <header class="header">
+        <div class="container header-grid">
+          <!-- Logo -->
+          <div class="header-left">
+            <a href="#" class="logo" @click.prevent="navigateTo('home')">
+              IT's <span class="text-blue">Food Time</span>
+            </a>
+          </div>
+          
+          <div class="header-center hidden-mobile">
+            <nav class="desktop-nav">
+              <a href="#hero" @click.prevent="navigateTo('home'); setTimeout(() => { window.location.hash='hero' }, 100)" class="nav-link">Home</a>
+              <a href="#menu" @click.prevent="navigateTo('home'); setTimeout(() => { window.location.hash='menu' }, 100)" class="nav-link">Menu</a>
+              <a href="#bundles" @click.prevent="navigateTo('home'); setTimeout(() => { window.location.hash='bundles' }, 100)" class="nav-link">Bundles</a>
+            </nav>
+          </div>
+          
+          <!-- Action Buttons -->
+          <div class="header-right">
+            <button class="cart-btn" @click="navigateTo('cart')">
+              <span class="cart-label hidden-mobile">Cart</span>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/>
+                <path d="M16 10a4 4 0 0 1-8 0"/>
+              </svg>
+              <div class="cart-badge" v-if="cart.length > 0">{{ cart.length }}</div>
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <!-- MOBILE BOTTOM NAVIGATION -->
+      <nav class="mobile-bottom-nav">
+        <!-- Home Section -->
+        <a href="#hero" class="mobile-nav-item" @click.prevent="scrollToSection('hero')" :class="{ active: activeMobileTab === 'hero' && currentPage === 'home' }">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        </a>
+        <!-- Signatures / Bundles (Bowl icon) -->
+        <a href="#bundles" class="mobile-nav-item" @click.prevent="scrollToSection('bundles')" :class="{ active: (activeMobileTab === 'menu' || activeMobileTab === 'bundles' || currentPage === 'all-menu') && currentPage !== 'cart' }">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h18a2 2 0 0 1 2 2v1h-3a4 4 0 0 1-8 0H1v-1a2 2 0 0 1 2-2z"/><path d="M12 13a7 7 0 0 0-7 7h14a7 7 0 0 0-7-7z"/></svg>
+        </a>
+        <!-- Cart -->
+        <a href="#" class="mobile-nav-item" @click.prevent="navigateTo('cart')" :class="{ active: currentPage === 'cart' }">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
+          <div class="cart-badge-mini" v-if="cart.length > 0">{{ cart.length }}</div>
+        </a>
+      </nav>
+
+      <main>
+        <!-- ==================== PAGE: HOME ==================== -->
+        <div v-if="currentPage === 'home'">
+          
+          <!-- Hero Section: Full Landscape with AI Restaurant Scene -->
+          <section id="hero" class="hero-full">
+            <div class="hero-overlay">
+              <div class="container hero-content-centered">
+                <div class="badge">🔥 Student Special DiSC 20%</div>
+                <h1>Gather & Eat with Joy,<br/><span class="text-blue">Just like Home!</span></h1>
+                <p>Tired of campus meals? IT's Food Time brings you fresh, hot, and tasty food where everyone can gather comfortably.</p>
+                <div class="hero-actions">
+                  <a href="#menu" class="btn btn-primary">Order Now</a>
+                  <a href="#bundles" class="btn btn-outline-light">View Combos</a>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Divider Marquee 1 (Smoother) -->
+          <div class="marquee-divider">
+            <div class="marquee-track smooth">
+              <span v-for="n in 20" :key="n">IT's Food Time ✦ </span>
+            </div>
+          </div>
+
+          <!-- Menu Section -->
+          <section id="menu" class="menu-section">
+            <div class="container">
+              <div class="section-header">
+                <h2>Craving for something?</h2>
+                <p>Select from our freshly made signatures</p>
+              </div>
+              
+              <div class="categories-container">
+                <div class="categories">
+                  <button 
+                    v-for="cat in categories" 
+                    :key="cat"
+                    class="cat-pill"
+                    :class="{ active: activeCategory === cat }"
+                    @click="activeCategory = cat"
+                  >
+                    {{ cat }}
+                  </button>
+                </div>
+              </div>
+
+              <div class="menu-grid">
+                <div class="menu-card" v-for="item in filteredMenu" :key="item.id" @click="openFoodDetail(item)">
+                  <div class="card-img-wrapper">
+                    <span class="popular-badge" v-if="item.popular">Popular</span>
+                    <img :src="item.img" :alt="item.name" loading="lazy" />
+                  </div>
+                  <div class="card-content">
+                    <div class="card-title">{{ item.name }}</div>
+                    <div class="card-desc">{{ item.desc }}</div>
+                    <div class="card-footer">
+                      <span class="price">{{ formatPrice(item.price) }}</span>
+                      <button class="add-btn" @click.stop="addDirectToCart(item)">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- See All Menu Button - Only visible when "All" (Popular) active -->
+              <div class="see-all-container" v-if="activeCategory === 'All'">
+                <button class="btn btn-outline see-all-btn" @click="navigateTo('all-menu')">
+                  Lihat Semua Menu
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                </button>
+              </div>
+            </div>
+          </section>
+
+          <!-- Divider Marquee 2 (Smoother) -->
+          <div class="marquee-divider alternate">
+            <div class="marquee-track smooth reverse">
+              <span v-for="n in 20" :key="n">IT's Food Time ✦ </span>
+            </div>
+          </div>
+
+          <!-- Bundles Section -->
+          <section id="bundles" class="bundles-section">
+            <div class="container">
+              <div class="section-header">
+                <h2>Best Value Bundles</h2>
+                <p>Save more with our special combos, exclusively for students!</p>
+              </div>
+              <div class="bundles-grid">
+                <div class="bundle-card" v-for="bundle in bundles" :key="bundle.id" @click="openFoodDetail(bundle)">
+                  <div class="bundle-img-wrapper">
+                    <img :src="bundle.img" :alt="bundle.name" class="bundle-img"/>
+                  </div>
+                  <div class="bundle-content">
+                    <div class="bundle-info">
+                      <h3>{{ bundle.name }}</h3>
+                      <p>{{ bundle.desc }}</p>
+                      <div class="price-row">
+                        <span class="price">{{ formatPrice(bundle.price) }}</span>
+                        <span class="old-price">{{ formatPrice(bundle.oldPrice) }}</span>
+                      </div>
+                    </div>
+                    <button class="btn btn-primary bundle-btn" @click.stop="openFoodDetail(bundle)">
+                      View Detail
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <!-- ==================== PAGE: CART ==================== -->
+        <div class="page-container" v-else-if="currentPage === 'cart'">
+          <div class="container page-content">
+            <div class="page-header">
+              <button class="back-btn" @click="navigateTo('home')">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+                Back to Menu
+              </button>
+              <h2>Your Cart 🛒</h2>
+            </div>
+            
+            <div v-if="cart.length > 0" class="cart-layout">
+              <!-- Cart items and summary details -->
+              <div class="cart-items-list">
+                <div class="cart-item-card" v-for="item in cart" :key="item.id">
+                  <div class="cart-item-img-wrapper">
+                    <img :src="item.img" :alt="item.name" />
+                  </div>
+                  <div class="item-details">
+                    <h4>{{ item.name }}</h4>
+                    <p class="item-desc-cart">{{ item.desc }}</p>
+                    <p class="item-price">{{ formatPrice(item.price) }}</p>
+                  </div>
+                  <div class="cart-item-actions">
+                    <div class="qty-controls-modern">
+                      <button @click="updateQuantity(item, -1)" aria-label="Decrease quantity">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                      </button>
+                      <span>{{ item.quantity }}</span>
+                      <button @click="updateQuantity(item, 1)" aria-label="Increase quantity">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                      </button>
+                    </div>
+                    <button class="delete-btn-modern" @click="updateQuantity(item, -item.quantity)" aria-label="Remove item">
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div class="cart-summary-card">
+                <h3>Order Summary</h3>
+                <div class="summary-row">
+                  <span>Subtotal ({{ cart.length }} items)</span>
+                  <span>{{ formatPrice(cartTotal) }}</span>
+                </div>
+                <div class="summary-row total">
+                  <span>Total</span>
+                  <span class="total-amount-large">{{ formatPrice(cartTotal) }}</span>
+                </div>
+                <button class="btn btn-primary w-full checkout-btn" @click="proceedToCheckout">Proceed to Checkout</button>
+              </div>
+            </div>
+            <div v-else class="empty-state">
+              <div class="empty-icon">🍟</div>
+              <h3>Your cart is empty</h3>
+              <p>Looks like you haven't added anything to your cart yet.</p>
+              <button class="btn btn-primary" @click="navigateTo('home')">Browse Menu</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ==================== PAGE: CHECKOUT ==================== -->
+        <div class="page-container" v-else-if="currentPage === 'checkout'">
+          <div class="container page-content">
+            <div class="page-header">
+              <button class="back-btn" @click="navigateTo('cart')">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+                Back to Cart
+              </button>
+              <h2>Checkout 💳</h2>
+            </div>
+            <div class="checkout-layout">
+              <div class="checkout-form">
+                <div class="form-section">
+                  <div class="checkout-title-with-icon">
+                    <span class="icon-circle">📍</span>
+                    <h3>Delivery Details</h3>
+                  </div>
+                  <div class="form-group">
+                    <label>Full Name</label>
+                    <input type="text" v-model="checkoutForm.name" placeholder="John Doe" required />
+                  </div>
+                  <div class="form-group">
+                    <label>Phone Number</label>
+                    <input type="tel" v-model="checkoutForm.phone" placeholder="0812xxxxxx" required />
+                  </div>
+                  <div class="form-group">
+                    <label>Complete Address</label>
+                    <textarea v-model="checkoutForm.address" placeholder="Student Dormitory Block C, Room 101" rows="3" required></textarea>
+                  </div>
+                </div>
+                <div class="form-section mt-4">
+                  <div class="checkout-title-with-icon">
+                    <span class="icon-circle">💳</span>
+                    <h3>Payment Method</h3>
+                  </div>
+                  <div class="payment-options">
+                    <label class="payment-card" :class="{ selected: checkoutForm.paymentMethod === 'qris' }">
+                      <input type="radio" value="qris" v-model="checkoutForm.paymentMethod">
+                      <div class="payment-info"><strong>QRIS</strong><span>Scan with any E-Wallet</span></div>
+                    </label>
+                    <label class="payment-card" :class="{ selected: checkoutForm.paymentMethod === 'cash' }">
+                      <input type="radio" value="cash" v-model="checkoutForm.paymentMethod">
+                      <div class="payment-info"><strong>Cash on Delivery</strong><span>Pay when food arrives</span></div>
+                    </label>
+                  </div>
+                </div>
+              </div>
+              <div class="cart-summary-card">
+                <h3>Final Summary</h3>
+                <div class="summary-list">
+                  <div class="summary-row text-sm text-gray" v-for="item in cart" :key="item.id">
+                    <span>{{ item.quantity }}x {{ item.name }}</span>
+                    <span>{{ formatPrice(item.price * item.quantity) }}</span>
+                  </div>
+                </div>
+                <hr class="summary-divider" />
+                <div class="summary-row total">
+                  <span>Grand Total</span>
+                  <span class="total-amount-large">{{ formatPrice(cartTotal) }}</span>
+                </div>
+                <button class="btn btn-primary w-full pay-btn" @click="processPayment">Complete Payment</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ==================== PAGE: INVOICE ==================== -->
+        <div class="page-container" v-else-if="currentPage === 'invoice'">
+          <div class="container invoice-content">
+            <div class="invoice-card">
+              <div class="success-icon">✓</div>
+              <h2>Order Confirmed!</h2>
+              <p class="invoice-subtitle">Thank you for ordering with IT's Food Time</p>
+              <div class="invoice-details">
+                <div class="invoice-row"><span class="label">Order ID:</span><span class="value order-id">{{ orderId }}</span></div>
+                <div class="invoice-row"><span class="label">Date:</span><span class="value">{{ new Date().toLocaleDateString() }}</span></div>
+                <div class="invoice-row"><span class="label">Payment Method:</span><span class="value capitalize">{{ checkoutForm.paymentMethod }}</span></div>
+              </div>
+              <div class="invoice-items">
+                <h4>Items Ordered</h4>
+                <div class="summary-row text-sm" v-for="item in cart" :key="item.id">
+                  <span>{{ item.quantity }}x {{ item.name }}</span>
+                  <span>{{ formatPrice(item.price * item.quantity) }}</span>
+                </div>
+                <hr class="summary-divider mt-3" />
+                <div class="summary-row total">
+                  <span>Total Paid</span>
+                  <span>{{ formatPrice(cartTotal) }}</span>
+                </div>
+              </div>
+              <div class="invoice-actions">
+                <button class="btn btn-primary wa-btn w-full" @click="processWhatsAppOrder">
+                  Send Invoice via WhatsApp
+                </button>
+                <button class="btn btn-outline w-full mt-3" @click="navigateTo('home'); cart=[]">Back to Home</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ==================== PAGE: ALL MENU (Categorized) ==================== -->
+        <div class="page-container" v-else-if="currentPage === 'all-menu'">
+          <div class="container page-content">
+            <div class="page-header center-header">
+              <button class="back-btn" @click="navigateTo('home')">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+                Back to Home
+              </button>
+              <h2>Explore Our Full Menu</h2>
+              <p>Selection of Main Courses, Snacks, and Drinks</p>
+            </div>
+
+            <div v-for="(items, categoryName) in categorizedMenu" :key="categoryName" class="menu-category-section">
+              <div class="category-divider">
+                <span>{{ categoryName }}</span>
+              </div>
+              
+              <div class="menu-grid">
+                <div class="menu-card" v-for="item in items" :key="item.id" @click="openFoodDetail(item)">
+                  <div class="card-img-wrapper">
+                    <span class="popular-badge" v-if="item.popular">Popular</span>
+                    <img :src="item.img" :alt="item.name" loading="lazy" />
+                  </div>
+                  <div class="card-content">
+                    <div class="card-title">{{ item.name }}</div>
+                    <div class="card-desc">{{ item.desc }}</div>
+                    <div class="card-footer">
+                      <span class="price">{{ formatPrice(item.price) }}</span>
+                      <button class="add-btn" @click.stop="addDirectToCart(item)">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </main>
+
+      <!-- DETAIL MODAL OVERLAY -->
+      <div class="modal-overlay" :class="{ 'fade-in': selectedFood }" v-if="selectedFood" @click.self="selectedFood = null">
+        <div class="food-detail-modal">
+          <button class="close-modal" @click="selectedFood = null">×</button>
+          <div class="modal-img-wrapper">
+            <img :src="selectedFood.img" :alt="selectedFood.name" />
+          </div>
+          <div class="modal-content">
+            <h2>{{ selectedFood.name }}</h2>
+            <p class="modal-desc">{{ selectedFood.desc }}</p>
+            <div class="modal-action-area">
+              <span class="modal-price">{{ formatPrice(selectedFood.price) }}</span>
+              <div class="qty-control-huge">
+                <button @click="changeTempQuantity(-1)">-</button>
+                <span class="qty-num">{{ tempQuantity }}</span>
+                <button @click="changeTempQuantity(1)">+</button>
+              </div>
+            </div>
+            <button class="btn btn-primary w-full add-to-cart-big" @click="addSelectedToCart">
+              Add to Cart - {{ formatPrice(selectedFood.price * tempQuantity) }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+/* App Container Base */
+.app-container {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  opacity: 0;
+  transition: opacity 0.8s ease-out;
+}
+.app-container.mounted {
+  opacity: 1;
+}
+.no-scroll {
+  overflow: hidden;
+  height: 100vh;
+}
+.text-blue {
+  color: var(--primary);
+}
+
+/* ================= MODERN LOADER LOGO ================= */
+.modern-loader {
+  position: fixed;
+  inset: 0;
+  background: white;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.8s cubic-bezier(0.85, 0, 0.15, 1);
+}
+.slide-up-exit {
+  transform: translateY(-100%);
+}
+.loader-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.5rem;
+}
+.loader-text-mask {
+  overflow: hidden;
+  display: inline-block;
+  padding: 10px 0;
+}
+.loader-text {
+  display: inline-block;
+  font-size: 4rem;
+  font-weight: 900;
+  color: var(--text-dark);
+  letter-spacing: -0.02em;
+  transform: translateY(110%);
+  animation: revealText 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.2s forwards;
+}
+.loader-line-wrapper {
+  width: 140px;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+  opacity: 0;
+  animation: fadeIn 0.4s ease 1s forwards;
+}
+.loader-line {
+  width: 0%;
+  height: 100%;
+  background: var(--primary);
+  border-radius: 2px;
+  animation: fillLine 1s cubic-bezier(0.16, 1, 0.3, 1) 1.2s forwards;
+}
+
+@keyframes revealText {
+  0% { transform: translateY(110%); }
+  100% { transform: translateY(0); }
+}
+@keyframes fillLine {
+  0% { width: 0%; }
+  100% { width: 100%; }
+}
+
+
+/* ================= HEADER & NAV (Centered layout) ================= */
+.header {
+  position: sticky;
+  top: 0;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(15px);
+  z-index: 50;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+}
+.header-grid {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  height: var(--header-height);
+}
+.header-left {
+  display: flex;
+  justify-content: flex-start;
+}
+.header-center {
+  display: flex;
+  justify-content: center;
+}
+.header-right {
+  display: flex;
+  justify-content: flex-end;
+}
+.logo {
+  font-size: 1.6rem;
+  font-weight: 800;
+  color: var(--text-dark);
+  letter-spacing: -0.02em;
+}
+.desktop-nav {
+  display: flex;
+  gap: 3rem;
+  background: rgba(226, 232, 240, 0.3);
+  padding: 0.5rem 1.5rem;
+  border-radius: var(--radius-full);
+}
+.nav-link {
+  font-weight: 600;
+  color: var(--text-light);
+  transition: color 0.2s;
+}
+.nav-link:hover {
+  color: var(--primary);
+}
+.cart-btn {
+  position: relative;
+  background: white;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem 1.25rem;
+  border-radius: var(--radius-full);
+  color: var(--text-dark);
+  font-weight: 600;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 4px 15px rgba(0,0,0,0.03);
+  border: 1px solid rgba(0,0,0,0.05);
+}
+.cart-btn:hover {
+  background: var(--primary);
+  color: white;
+  border-color: var(--primary);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-primary);
+}
+.cart-badge {
+  background: var(--text-dark);
+  color: white;
+  font-size: 0.75rem;
+  font-weight: bold;
+  height: 22px;
+  min-width: 22px;
+  padding: 0 6px;
+  border-radius: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.cart-btn:hover .cart-badge {
+  background: white;
+  color: var(--primary);
+}
+
+
+/* ================= HERO (LANDSCAPE BACKGROUND) ================= */
+.hero-full {
+  width: 100%;
+  height: 85vh;
+  min-height: 500px;
+  display: flex;
+  background-image: url('/restaurant_scene.png');
+  background-size: 115%; /* zoom a bit to allow panning */
+  background-position: center;
+  background-repeat: no-repeat;
+  position: relative;
+  overflow: hidden;
+  animation: bgPan 40s linear infinite alternate;
+}
+@keyframes bgPan {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 100% 50%; }
+}
+.hero-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.7) 0%, rgba(26, 30, 41, 0.4) 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.hero-content-centered {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  max-width: 800px;
+}
+.hero-content-centered .badge {
+  background: rgba(255,255,255,0.15);
+  backdrop-filter: blur(8px);
+  color: white;
+  border: 1px solid rgba(255,255,255,0.3);
+  font-weight: 700;
+  font-size: 0.9rem;
+  padding: 0.6rem 1.5rem;
+  border-radius: var(--radius-full);
+  margin-bottom: 2rem;
+}
+.hero-content-centered h1 {
+  font-size: 4.5rem;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  margin-bottom: 1.5rem;
+  color: white;
+  text-shadow: 0 10px 30px rgba(0,0,0,0.5);
+}
+.hero-content-centered p {
+  font-size: 1.25rem;
+  color: #e2e8f0;
+  margin-bottom: 2.5rem;
+  text-shadow: 0 4px 15px rgba(0,0,0,0.5);
+  line-height: 1.6;
+}
+.hero-actions {
+  display: flex;
+  gap: 1.5rem;
+}
+.btn-outline-light {
+  background-color: transparent;
+  color: white;
+  border: 2px solid white;
+}
+.btn-outline-light:hover {
+  background-color: white;
+  color: var(--text-dark);
+}
+
+/* ================= MARQUEE LOOP (SMOOTH, NO EDGES) ================= */
+.marquee-divider {
+  width: 100%;
+  background: var(--primary-hover); 
+  color: var(--surface);
+  padding: 1.25rem 0;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  font-weight: 700;
+  font-size: 1.1rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.alternate {
+  background: var(--primary-hover);
+}
+.marquee-track.smooth {
+  display: flex;
+  white-space: nowrap;
+  animation: marquee 30s linear infinite;
+  will-change: transform;
+}
+.marquee-track.reverse {
+  animation: marquee-reverse 30s linear infinite;
+}
+.marquee-track span {
+  padding: 0 3rem;
+  display: inline-block;
+}
+@keyframes marquee {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); } 
+}
+@keyframes marquee-reverse {
+  0% { transform: translateX(-50%); }
+  100% { transform: translateX(0); } 
+}
+
+
+/* ================= MENU & BUNDLES ================= */
+.section-header {
+  text-align: center;
+  margin-bottom: 3.5rem;
+}
+.section-header h2 {
+  font-size: 2.5rem;
+  margin-bottom: 0.5rem;
+}
+.section-header p {
+  color: var(--text-light);
+  font-size: 1.1rem;
+}
+
+.categories-container {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 3.5rem;
+}
+.categories {
+  display: flex;
+  background: white;
+  padding: 0.5rem;
+  border-radius: var(--radius-full);
+  box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+  gap: 0.25rem;
+  border: 1px solid var(--border);
+}
+.cat-pill {
+  padding: 0.8rem 1.8rem;
+  border-radius: var(--radius-full);
+  font-weight: 700;
+  color: var(--text-light);
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  font-size: 0.95rem;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+.cat-pill:hover {
+  color: var(--primary);
+  background: var(--secondary);
+}
+.cat-pill.active {
+  background: var(--text-dark);
+  color: white;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.see-all-container {
+  display: flex;
+  justify-content: center;
+  margin-top: 1rem;
+  margin-bottom: 4rem;
+}
+.see-all-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 1.2rem 2.5rem;
+  font-size: 1.1rem;
+  font-weight: 700;
+  border-radius: var(--radius-full);
+}
+
+.center-header { text-align: center; }
+.center-header p { color: var(--text-light); margin-bottom: 2rem; }
+
+.menu-category-section {
+  margin-bottom: 5rem;
+}
+.category-divider {
+  display: flex;
+  align-items: center;
+  margin-bottom: 2.5rem;
+}
+.category-divider::before, .category-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+.category-divider span {
+  padding: 0 1.5rem;
+  font-size: 1.5rem;
+  font-weight: 900;
+  color: var(--text-dark);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.menu-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 2rem;
+}
+.menu-card {
+  background: white;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.03);
+  border: 1px solid rgba(0,0,0,0.02);
+  transition: transform 0.3s, box-shadow 0.3s;
+  display: flex;
+  flex-direction: column;
+  cursor: pointer;
+}
+.menu-card:hover {
+  transform: translateY(-8px);
+  box-shadow: var(--shadow-md);
+}
+.card-img-wrapper {
+  position: relative;
+  height: 240px;
+  overflow: hidden;
+}
+.card-img-wrapper img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.5s ease;
+}
+.menu-card:hover .card-img-wrapper img {
+  transform: scale(1.06);
+}
+.popular-badge {
+  position: absolute;
+  top: 15px;
+  right: 15px;
+  background: white;
+  color: var(--primary);
+  font-size: 0.75rem;
+  font-weight: 800;
+  padding: 0.4rem 0.8rem;
+  border-radius: var(--radius-full);
+  z-index: 10;
+  box-shadow: var(--shadow-sm);
+  text-transform: uppercase;
+}
+.card-content {
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+.card-title {
+  font-size: 1.3rem;
+  font-weight: 800;
+  margin-bottom: 0.5rem;
+}
+.card-desc {
+  font-size: 0.95rem;
+  color: var(--text-light);
+  margin-bottom: 1.5rem;
+  flex: 1;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.card-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.add-btn {
+  background: var(--bg);
+  color: var(--text-dark);
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-full);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+.menu-card:hover .add-btn {
+  background: var(--primary);
+  color: white;
+}
+
+/* Bundles */
+.bundles-section {
+  padding: 6rem 0;
+  background: #fff;
+}
+.bundles-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+  gap: 2.5rem;
+}
+.bundle-card {
+  background: var(--bg);
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.03);
+  transition: all 0.3s;
+  cursor: pointer;
+}
+.bundle-card:hover {
+  transform: translateY(-5px);
+  box-shadow: var(--shadow-md);
+}
+.bundle-img-wrapper {
+  height: 240px;
+  overflow: hidden;
+  background: var(--bg);
+}
+.bundle-img-wrapper img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.5s;
+}
+.bundle-card:hover .bundle-img-wrapper img {
+  transform: scale(1.03);
+}
+.bundle-content {
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+.bundle-info h3 {
+  font-size: 1.4rem;
+  font-weight: 800;
+  color: var(--text-dark);
+  margin-bottom: 0.5rem;
+}
+.bundle-info p {
+  color: var(--text-light);
+  line-height: 1.5;
+  margin-bottom: 1.25rem;
+  font-size: 0.95rem;
+}
+.price-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+.price {
+  font-weight: 800;
+  color: var(--primary);
+  font-size: 1.4rem;
+}
+.old-price {
+  text-decoration: line-through;
+  color: #94a3b8;
+  font-size: 1.1rem;
+}
+.bundle-btn {
+  width: 100%;
+  padding: 1rem;
+  font-size: 1rem;
+  border-radius: var(--radius-full);
+}
+
+
+/* ================= FOOD DETAIL MODAL ================= */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(5px);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+.food-detail-modal {
+  background: white;
+  border-radius: var(--radius-lg);
+  width: 100%;
+  max-width: 480px;
+  overflow: hidden;
+  box-shadow: 0 25px 50px rgba(0,0,0,0.25);
+  position: relative;
+  animation: scaleUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes scaleUp {
+  0% { transform: scale(0.95); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.close-modal {
+  position: absolute;
+  top: 15px;
+  right: 15px;
+  width: 36px;
+  height: 36px;
+  background: rgba(0,0,0,0.5);
+  color: white;
+  border-radius: 50%;
+  font-size: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  backdrop-filter: blur(4px);
+  transition: background 0.2s;
+}
+.close-modal:hover {
+  background: rgba(0,0,0,0.8);
+}
+.modal-img-wrapper {
+  height: 280px;
+  width: 100%;
+}
+.modal-img-wrapper img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.modal-content {
+  padding: 2rem;
+}
+.modal-content h2 {
+  font-size: 1.8rem;
+  margin-bottom: 0.5rem;
+}
+.modal-desc {
+  color: var(--text-light);
+  line-height: 1.6;
+  margin-bottom: 2rem;
+}
+.modal-action-area {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2rem;
+}
+.modal-price {
+  font-size: 1.6rem;
+  font-weight: 800;
+  color: var(--primary);
+}
+.qty-control-huge {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  background: var(--secondary);
+  padding: 0.5rem;
+  border-radius: var(--radius-full);
+}
+.qty-control-huge button {
+  width: 40px;
+  height: 40px;
+  background: white;
+  border-radius: 50%;
+  font-size: 1.25rem;
+  font-weight: bold;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+  transition: all 0.2s;
+}
+.qty-control-huge button:hover {
+  background: var(--text-dark);
+  color: white;
+}
+.qty-num {
+  font-size: 1.25rem;
+  font-weight: 800;
+  width: 30px;
+  text-align: center;
+}
+.add-to-cart-big {
+  padding: 1.25rem;
+  font-size: 1.1rem;
+}
+
+
+/* ================= PAGES GENERIC ================= */
+.page-container {
+  padding: 4rem 0 8rem;
+  background: var(--bg);
+  min-height: calc(100vh - var(--header-height));
+}
+.page-header {
+  margin-bottom: 3rem;
+}
+.back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: white;
+  color: var(--text-dark);
+  padding: 0.6rem 1.25rem;
+  border-radius: var(--radius-full);
+  font-weight: 600;
+  margin-bottom: 2rem;
+  transition: all 0.2s;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.03);
+  border: 1px solid rgba(0,0,0,0.05);
+  cursor: pointer;
+}
+.back-btn:hover {
+  background: var(--bg);
+  transform: translateX(-3px);
+  color: var(--primary);
+}
+.page-header h2 {
+  font-size: 2.5rem;
+}
+
+/* ================= CART PAGE ================= */
+.cart-layout {
+  display: grid;
+  grid-template-columns: 1fr 380px;
+  gap: 3rem;
+  align-items: start;
+}
+.cart-items-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  max-height: 540px;
+  overflow-y: auto;
+  padding-right: 0.5rem;
+}
+.cart-items-list::-webkit-scrollbar { width: 6px; }
+.cart-items-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 10px; }
+.cart-item-card {
+  background: white;
+  border-radius: var(--radius-lg);
+  padding: 1.2rem;
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.04);
+  border: 1px solid rgba(0,0,0,0.03);
+  transition: transform 0.2s;
+}
+.cart-item-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+.cart-item-img-wrapper {
+  width: 110px;
+  height: 110px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.cart-item-img-wrapper img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.cart-item-card .item-details {
+  flex: 1;
+}
+.cart-item-card .item-details h4 {
+  font-size: 1.25rem;
+  margin-bottom: 0.3rem;
+  color: var(--text-dark);
+}
+.item-desc-cart {
+  font-size: 0.85rem;
+  color: var(--text-light);
+  margin-bottom: 0.6rem;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.cart-item-card .item-price {
+  font-size: 1.15rem;
+  color: var(--primary);
+  font-weight: 800;
+}
+.cart-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+}
+.qty-controls-modern {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  background: var(--bg);
+  padding: 0.4rem 0.6rem;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border);
+}
+.qty-controls-modern button {
+  background: white;
+  color: var(--text-dark);
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid rgba(0,0,0,0.05);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+}
+.qty-controls-modern button:hover {
+  background: var(--primary);
+  color: white;
+}
+.qty-controls-modern span {
+  font-weight: 700;
+  font-size: 1rem;
+  min-width: 20px;
+  text-align: center;
+}
+.delete-btn-modern {
+  color: #ef4444;
+  background: #fee2e2;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+.delete-btn-modern:hover {
+  background: #dc2626;
+  color: white;
+}
+.cart-summary-card {
+  background: white;
+  border-radius: var(--radius-lg);
+  padding: 2rem;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.04);
+  border: 1px solid var(--border);
+}
+.cart-summary-card h3 {
+  font-size: 1.4rem;
+  margin-bottom: 1.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid rgba(0,0,0,0.05);
+}
+.summary-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+  color: var(--text-light);
+  font-weight: 500;
+}
+.summary-divider {
+  border: none;
+  border-top: 1px dashed rgba(0,0,0,0.1);
+  margin: 1.5rem 0;
+}
+.summary-row.total {
+  color: var(--text-dark);
+  font-weight: 800;
+  align-items: center;
+}
+.total-amount-large {
+  font-size: 1.8rem;
+  color: var(--primary);
+}
+.w-full {
+  width: 100%;
+}
+.checkout-btn {
+  margin-top: 2rem;
+  padding: 1.1rem;
+}
+.empty-state {
+  text-align: center;
+  padding: 5rem 0;
+}
+.empty-state .empty-icon {
+  font-size: 5rem;
+  margin-bottom: 1.5rem;
+  animation: float 4s ease-in-out infinite;
+}
+
+/* ================= CHECKOUT PAGE ================= */
+.checkout-layout {
+  display: grid;
+  grid-template-columns: 1fr 400px;
+  gap: 3rem;
+  align-items: start;
+}
+.checkout-form {
+  background: white;
+  border-radius: var(--radius-lg);
+  padding: 2.5rem;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.02);
+  border: 1px solid var(--border);
+}
+.form-section h3 {
+  font-size: 1.3rem;
+  margin-bottom: 1.5rem;
+}
+.form-group {
+  margin-bottom: 1.5rem;
+}
+.form-group label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  color: var(--text-dark);
+}
+.form-group input, .form-group textarea {
+  width: 100%;
+  padding: 1rem;
+  border: 1px solid rgba(0,0,0,0.1);
+  border-radius: var(--radius-md);
+  font-family: inherit;
+  font-size: 1rem;
+  transition: border 0.2s;
+}
+.form-group input:focus, .form-group textarea:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 4px var(--secondary);
+}
+.checkout-title-with-icon {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  margin-bottom: 1.5rem;
+}
+.checkout-title-with-icon h3 {
+  margin-bottom: 0;
+}
+.icon-circle {
+  background: var(--secondary);
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-size: 1.1rem;
+}
+.mt-4 { margin-top: 3rem; }
+.payment-options {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.payment-card {
+  display: flex;
+  align-items: center;
+  padding: 1.25rem;
+  border: 2px solid rgba(0,0,0,0.05);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.payment-card:hover {
+  background: var(--bg);
+}
+.payment-card.selected {
+  border-color: var(--primary);
+  background: var(--secondary);
+}
+.payment-card input {
+  margin-right: 1.25rem;
+  transform: scale(1.2);
+  accent-color: var(--primary);
+}
+.payment-info strong {
+  display: block;
+  font-size: 1.1rem;
+  color: var(--text-dark);
+}
+.payment-info span {
+  font-size: 0.9rem;
+  color: var(--text-light);
+}
+.summary-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  max-height: 250px;
+  overflow-y: auto;
+  padding-right: 0.5rem;
+}
+.summary-list::-webkit-scrollbar { width: 6px; }
+.summary-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 10px; }
+.text-sm { font-size: 0.95rem; }
+.text-gray { color: var(--text-light); }
+.pay-btn { margin-top: 2rem; padding: 1.1rem; }
+
+
+/* ================= INVOICE PAGE ================= */
+.invoice-content {
+  display: flex;
+  justify-content: center;
+}
+.invoice-card {
+  background: white;
+  width: 100%;
+  max-width: 500px;
+  border-radius: var(--radius-lg);
+  padding: 3rem;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.05);
+  text-align: center;
+  border: 1px solid var(--border);
+}
+.success-icon {
+  width: 80px;
+  height: 80px;
+  background: #22c55e;
+  color: white;
+  font-size: 3rem;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 1.5rem;
+  box-shadow: 0 10px 20px rgba(34, 197, 94, 0.3);
+}
+.invoice-card h2 {
+  font-size: 2rem;
+  margin-bottom: 0.5rem;
+}
+.invoice-subtitle {
+  color: var(--text-light);
+  margin-bottom: 2.5rem;
+}
+.invoice-details {
+  background: var(--secondary);
+  padding: 1.5rem;
+  border-radius: var(--radius-md);
+  text-align: left;
+  margin-bottom: 2rem;
+}
+.invoice-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+.invoice-row:last-child { margin-bottom: 0; }
+.invoice-row .label {
+  color: var(--text-dark);
+  font-weight: 500;
+}
+.invoice-row .value {
+  font-weight: 700;
+  color: var(--text-dark);
+}
+.order-id { color: var(--primary) !important; }
+.capitalize { text-transform: capitalize; }
+.invoice-items {
+  text-align: left;
+  margin-bottom: 2.5rem;
+}
+.invoice-items h4 {
+  font-size: 1.2rem;
+  margin-bottom: 1rem;
+  border-bottom: 2px solid var(--border);
+  padding-bottom: 0.5rem;
+}
+.mt-3 { margin-top: 1.5rem; }
+.wa-btn {
+  background: #25D366; 
+  padding: 1rem;
+  box-shadow: 0 8px 20px rgba(37, 211, 102, 0.25);
+  border-color: #25D366;
+  color: white;
+}
+.wa-btn:hover { background: #1faf53; color: white; border-color:#1faf53; }
+
+
+/* Mobile Bottom Navigation Hidden by Default */
+.mobile-bottom-nav {
+  display: none;
+}
+
+@media (max-width: 992px) {
+  .hero-content-centered h1 { font-size: 3.5rem; }
+  .cart-layout, .checkout-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .loader-text {
+    font-size: 2.2rem;
+  }
+  .loader-line-wrapper {
+    width: 100px;
+  }
+  .header-grid {
+    grid-template-columns: 1fr auto;
+    gap: 0.5rem;
+  }
+  .logo {
+    font-size: 1.25rem;
+    white-space: nowrap;
+  }
+  .page-header {
+    margin-bottom: 1.5rem;
+  }
+  .page-header h2 {
+    font-size: 1.8rem;
+  }
+  .page-container {
+    padding-top: 2rem;
+  }
+  .hero-full {
+    height: 70vh;
+    min-height: 400px;
+    background-size: cover;
+  }
+  .hero-content-centered {
+    padding: 0 1rem;
+  }
+  .hero-content-centered h1 { 
+    font-size: 2.2rem; 
+    margin-bottom: 1rem;
+  }
+  .hero-content-centered p {
+    font-size: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  .hero-actions {
+    gap: 0.8rem;
+  }
+  .btn {
+    padding: 0.7rem 1.2rem;
+    font-size: 0.9rem;
+  }
+  
+  .menu-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 0.75rem !important;
+  }
+  .card-img-wrapper {
+    height: 110px !important;
+  }
+  .card-content {
+    padding: 0.75rem !important;
+  }
+  .card-title {
+    font-size: 0.95rem !important;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .card-desc {
+    font-size: 0.75rem !important;
+    margin-bottom: 0.75rem !important;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+  }
+  .price {
+    font-size: 0.9rem !important;
+  }
+  .categories-container {
+    margin-bottom: 2rem;
+    overflow-x: auto;
+    justify-content: flex-start;
+    padding: 0 1rem;
+    -webkit-overflow-scrolling: touch;
+  }
+  .categories-container::-webkit-scrollbar { display: none; }
+  .categories {
+    box-shadow: none;
+    background: transparent;
+    padding: 0;
+    gap: 0.5rem;
+    border: none;
+  }
+  .cat-pill {
+    padding: 0.6rem 1.2rem;
+    font-size: 0.85rem;
+    white-space: nowrap;
+    background: white;
+    border: 1px solid var(--border);
+  }
+  .cat-pill.active {
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+  }
+  .category-divider span {
+    font-size: 1.1rem;
+    padding: 0 1rem;
+  }
+  .add-btn svg {
+    width: 14px;
+    height: 14px;
+  }
+  .popular-badge {
+    font-size: 0.6rem !important;
+    padding: 0.2rem 0.5rem !important;
+    top: 8px !important;
+    right: 8px !important;
+  }
+
+  .bundles-grid {
+    grid-template-columns: 1fr;
+    gap: 1.5rem;
+  }
+  
+  .cart-item-card {
+    display: grid;
+    grid-template-columns: 80px 1fr;
+    grid-template-rows: auto auto;
+    gap: 0.5rem 1rem;
+    padding: 1rem !important;
+    text-align: left;
+  }
+  .cart-item-img-wrapper {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+    width: 80px;
+    height: 80px;
+  }
+  .cart-item-card .item-details {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .cart-item-card .item-details h4 {
+    font-size: 1.1rem;
+  }
+  .cart-item-card .item-price {
+    font-size: 1rem;
+  }
+  .item-desc-cart {
+    -webkit-line-clamp: 1;
+    line-clamp: 1;
+    margin-bottom: 0.3rem;
+  }
+  .cart-item-actions {
+    grid-column: 2;
+    grid-row: 2;
+    margin-left: 0;
+    width: 100%;
+    justify-content: space-between;
+  }
+  .qty-controls-modern {
+    padding: 0.3rem 0.5rem;
+    gap: 0.5rem;
+  }
+  .qty-controls-modern button {
+    width: 24px;
+    height: 24px;
+  }
+  .qty-controls-modern span {
+    font-size: 0.9rem;
+  }
+  .delete-btn-modern {
+    width: 32px;
+    height: 32px;
+    padding: 0.3rem;
+  }
+  
+  /* Fix Modal Sizing */
+  .food-detail-modal {
+    max-height: 90vh; /* Don't overflow screen */
+    overflow-y: auto; 
+    border-radius: var(--radius-md);
+  }
+  .modal-img-wrapper {
+    height: 200px;
+  }
+  .modal-content {
+    padding: 1.25rem;
+  }
+  .modal-content h2 {
+    font-size: 1.4rem;
+  }
+  .modal-desc {
+    font-size: 0.85rem;
+    margin-bottom: 1rem;
+  }
+  .modal-price {
+    font-size: 1.2rem;
+  }
+  .qty-control-huge {
+    padding: 0.25rem 0.5rem;
+  }
+  .qty-control-huge button {
+    width: 30px;
+    height: 30px;
+    font-size: 1rem;
+  }
+  .qty-num {
+    font-size: 1rem;
+    width: 20px;
+  }
+  .add-to-cart-big {
+    padding: 0.8rem;
+    font-size: 0.95rem;
+  }
+  
+  /* Additional padding for bottom nav space */
+  .page-container {
+    padding-bottom: 100px;
+  }
+  
+  /* Show Mobile Bottom Navigation */
+  .mobile-bottom-nav {
+    display: flex;
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(210, 230, 255, 0.75);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    border-radius: var(--radius-full);
+    padding: 0 1rem;
+    height: 64px;
+    justify-content: space-around;
+    align-items: center;
+    width: 80%;
+    max-width: 320px;
+    z-index: 99;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
+    border: none;
+  }
+  .cart-badge-mini {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: var(--primary);
+    color: white;
+    font-size: 0.7rem;
+    font-weight: 800;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid white;
+    z-index: 10;
+  }
+  .mobile-nav-item {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    color: #475569;
+    height: 100%;
+    width: 64px;
+    transition: all 0.3s;
+  }
+  .mobile-nav-item span {
+    display: none;
+  }
+  .mobile-nav-item svg {
+    width: 26px;
+    height: 26px;
+    transition: transform 0.2s, color 0.3s;
+    z-index: 2;
+  }
+  .mobile-nav-item.active {
+    color: var(--primary);
+  }
+  .mobile-nav-item.active::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 32px;
+    height: 3px;
+    background: var(--primary);
+    border-radius: 0 0 4px 4px;
+    box-shadow: 0 2px 10px var(--primary);
+  }
+  .mobile-nav-item.active::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 44px;
+    height: 100%;
+    background: linear-gradient(to bottom, rgba(59, 130, 246, 0.25) 0%, transparent 80%);
+    pointer-events: none;
+    clip-path: polygon(25% 0, 75% 0, 100% 100%, 0% 100%);
+  }
+
+  /* Invoice Mobile Overrides */
+  .invoice-card {
+    padding: 1.5rem !important;
+  }
+  .invoice-card h2 {
+    font-size: 1.6rem;
+  }
+  .invoice-details {
+    padding: 1.25rem;
+  }
+  .invoice-row {
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    margin-bottom: 0.8rem;
+  }
+  .invoice-row .value {
+    word-break: break-all;
+  }
+  .invoice-items .summary-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    align-items: flex-start;
+  }
+  .invoice-items .summary-row span:first-child {
+    flex: 1;
+    text-align: left;
+    line-height: 1.4;
+  }
+  .invoice-items .summary-row span:last-child {
+    white-space: nowrap;
+    padding-left: 0.5rem;
+  }
+}
+
+</style>
