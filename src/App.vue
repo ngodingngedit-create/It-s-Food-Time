@@ -237,7 +237,7 @@ onMounted(() => {
     <div class="modern-loader" :class="{ 'slide-up-exit': !isAppLoading }" v-if="preventUnmount">
       <div class="loader-content">
         <div class="loader-text-mask">
-          <span class="loader-text">IT's <span class="text-blue">Food Time</span></span>
+          <img src="/logo/logo.png" alt="IT's Food Time Logo" class="loader-logo" />
         </div>
         <div class="loader-line-wrapper">
           <div class="loader-line"></div>
@@ -254,7 +254,7 @@ onMounted(() => {
           <!-- Logo -->
           <div class="header-left">
             <a href="#" class="logo" @click.prevent="navigateTo('home')">
-              IT's <span class="text-blue">Food Time</span>
+              <img src="/logo/logo.png" alt="Logo" class="logo-img" />
             </a>
           </div>
           
@@ -305,7 +305,7 @@ onMounted(() => {
           <section id="hero" class="hero-full">
             <div class="hero-overlay">
               <div class="container hero-content-centered">
-                <div class="badge">🔥 Student Special DiSC 20%</div>
+                <div class="badge">Student Special DiSC 20%</div>
                 <h1>Gather & Eat with Joy,<br/><span class="text-blue">Just like Home!</span></h1>
                 <p>Tired of campus meals? IT's Food Time brings you fresh, hot, and tasty food where everyone can gather comfortably.</p>
                 <div class="hero-actions">
@@ -687,12 +687,10 @@ onMounted(() => {
   display: inline-block;
   padding: 10px 0;
 }
-.loader-text {
-  display: inline-block;
-  font-size: 4rem;
-  font-weight: 900;
-  color: var(--text-dark);
-  letter-spacing: -0.02em;
+.loader-logo {
+  height: 240px;
+  width: auto;
+  object-fit: contain;
   transform: translateY(110%);
   animation: revealText 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.2s forwards;
 }
@@ -751,10 +749,13 @@ onMounted(() => {
   justify-content: flex-end;
 }
 .logo {
-  font-size: 1.6rem;
-  font-weight: 800;
-  color: var(--text-dark);
-  letter-spacing: -0.02em;
+  display: flex;
+  align-items: center;
+}
+.logo-img {
+  height: 80px;
+  width: auto;
+  object-fit: contain;
 }
 .desktop-nav {
   display: flex;
@@ -817,18 +818,51 @@ onMounted(() => {
   height: 85vh;
   min-height: 500px;
   display: flex;
-  background-image: url('/restaurant_scene.png');
-  background-size: 115%; /* zoom a bit to allow panning */
+  background-image: url('/situasi.png');
+  background-size: cover;
   background-position: center;
-  background-repeat: no-repeat;
   position: relative;
   overflow: hidden;
-  animation: bgPan 40s linear infinite alternate;
+  animation: heroZoom 15s ease-in-out infinite alternate;
 }
-@keyframes bgPan {
-  0% { background-position: 0% 50%; }
-  100% { background-position: 100% 50%; }
+
+.hero-full::before, .hero-full::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  z-index: 0;
+  opacity: 0;
 }
+
+.hero-full::before {
+  background-image: url('/situasi2.png');
+  animation: crossfade2 15s infinite;
+}
+
+.hero-full::after {
+  background-image: url('/situasi3.png');
+  animation: crossfade3 15s infinite;
+}
+
+@keyframes heroZoom {
+  0% { transform: scale(1); }
+  100% { transform: scale(1.05); }
+}
+
+@keyframes crossfade2 {
+  0%, 25% { opacity: 0; }
+  33%, 58% { opacity: 1; }
+  66%, 100% { opacity: 0; }
+}
+
+@keyframes crossfade3 {
+  0%, 58% { opacity: 0; }
+  66%, 91% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
 .hero-overlay {
   position: absolute;
   inset: 0;
@@ -836,6 +870,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
+  z-index: 1;
 }
 .hero-content-centered {
   text-align: center;
