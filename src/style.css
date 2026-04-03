@@ -1,7 +1,7 @@
 :root {
-  --primary: #3b82f6; /* Medium light blue */
-  --primary-hover: #2563eb;
-  --secondary: #dbeafe; /* Very soft light blue */
+  --primary: #b42a17; /* Red */
+  --primary-hover: #962213;
+  --secondary: #fcebe9; /* Very soft light red */
   --bg: #ffffff; /* White */
   --surface: #ffffff;
   --text: #334155;
@@ -10,7 +10,7 @@
   --border: #e2e8f0;
   --shadow-sm: 0 4px 6px rgba(0, 0, 0, 0.05);
   --shadow-md: 0 10px 30px rgba(0, 0, 0, 0.08);
-  --shadow-primary: 0 8px 20px rgba(59, 130, 246, 0.25);
+  --shadow-primary: 0 8px 20px rgba(180, 42, 23, 0.25);
   --radius-sm: 8px;
   --radius-md: 14px;
   --radius-lg: 24px;

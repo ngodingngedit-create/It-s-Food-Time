@@ -237,7 +237,7 @@ onMounted(() => {
     <div class="modern-loader" :class="{ 'slide-up-exit': !isAppLoading }" v-if="preventUnmount">
       <div class="loader-content">
         <div class="loader-text-mask">
-          <img src="/logo/logo.png" alt="IT's Food Time Logo" class="loader-logo" />
+          <img src="/logo/logo1.png" alt="IT's Food Time Logo" class="loader-logo" />
         </div>
         <div class="loader-line-wrapper">
           <div class="loader-line"></div>
@@ -254,7 +254,7 @@ onMounted(() => {
           <!-- Logo -->
           <div class="header-left">
             <a href="#" class="logo" @click.prevent="navigateTo('home')">
-              <img src="/logo/logo.png" alt="Logo" class="logo-img" />
+              <img src="/logo/logo1.png" alt="Logo" class="logo-img" />
             </a>
           </div>
           
@@ -306,7 +306,7 @@ onMounted(() => {
             <div class="hero-overlay">
               <div class="container hero-content-centered">
                 <div class="badge">Student Special DiSC 20%</div>
-                <h1>Gather & Eat with Joy,<br/><span class="text-blue">Just like Home!</span></h1>
+                <h1>Gather & Eat with Joy,<br/><span class="text-primary">Just like Home!</span></h1>
                 <p>Tired of campus meals? IT's Food Time brings you fresh, hot, and tasty food where everyone can gather comfortably.</p>
                 <div class="hero-actions">
                   <a href="#menu" class="btn btn-primary">Order Now</a>
@@ -658,7 +658,7 @@ onMounted(() => {
   overflow: hidden;
   height: 100vh;
 }
-.text-blue {
+.text-primary {
   color: var(--primary);
 }
 
