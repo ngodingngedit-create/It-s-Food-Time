@@ -180,6 +180,52 @@ const scrollToSection = (id) => {
   }
 }
 
+// --- Coming Soon State ---
+const isComingSoon = ref(true)
+const countdownDate = new Date('2026-05-01T00:00:00').getTime()
+const timeLeft = ref({
+  days: 0,
+  hours: 0,
+  minutes: 0,
+  seconds: 0
+})
+
+const regForm = ref({
+  name: '',
+  email: ''
+})
+const isSubmitted = ref(false)
+
+const updateCountdown = () => {
+  const now = new Date().getTime()
+  const distance = countdownDate - now
+  
+  if (distance < 0) {
+    timeLeft.value = { days: 0, hours: 0, minutes: 0, seconds: 0 }
+    return
+  }
+  
+  timeLeft.value = {
+    days: Math.floor(distance / (1000 * 60 * 60 * 24)),
+    hours: Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60)),
+    minutes: Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60)),
+    seconds: Math.floor((distance % (1000 * 60)) / 1000)
+  }
+}
+
+const submitRegistration = () => {
+  if (regForm.value.name && regForm.value.email) {
+    console.log('Registration submitted:', regForm.value)
+    isSubmitted.value = true
+    setTimeout(() => {
+      isSubmitted.value = false
+      regForm.value = { name: '', email: '' }
+    }, 3000)
+  }
+}
+
+let countdownInterval = null
+
 // --- Lifecycle & Scroll Tracking ---
 let scrollObserver = null
 
@@ -197,7 +243,6 @@ const initScrollObserver = () => {
     rootMargin: "-20% 0px -20% 0px" 
   })
 
-  // Observe all possible landing sections
   const sections = ['hero', 'menu', 'bundles']
   sections.forEach(id => {
     const el = document.getElementById(id)
@@ -205,25 +250,36 @@ const initScrollObserver = () => {
   })
 }
 
-// Re-observe when returning to home because v-if destroys DOM elements
 watch(currentPage, (newPage) => {
   if (newPage === 'home') {
     nextTick(() => {
       initScrollObserver()
     })
   } else {
-    // When on other pages, we can clear the scroll tab if needed, 
-    // or let it be handled by the icon active class logic
     activeMobileTab.value = ''
   }
 })
 
+// Control overflow for Coming Soon
+watch(isComingSoon, (val) => {
+  if (val) {
+    document.body.style.overflow = 'hidden'
+    document.body.style.height = '100vh'
+  } else {
+    document.body.style.overflow = ''
+    document.body.style.height = ''
+  }
+}, { immediate: true })
+
 onMounted(() => {
+  updateCountdown()
+  countdownInterval = setInterval(updateCountdown, 1000)
+  
   setTimeout(() => {
     isAppLoading.value = false
     setTimeout(() => {
       preventUnmount.value = false
-      if (currentPage.value === 'home') {
+      if (currentPage.value === 'home' && !isComingSoon.value) {
         initScrollObserver()
       }
     }, 100) 
@@ -249,8 +305,8 @@ onMounted(() => {
     <div class="app-container" :class="{ 'mounted': !isAppLoading }" v-show="!preventUnmount || !isAppLoading">
       
       <!-- HEADER -->
-      <header class="header">
-        <div class="container header-grid">
+      <header class="header" :class="{ 'coming-soon-header': isComingSoon }">
+        <div class="container header-grid" v-if="!isComingSoon">
           <!-- Logo -->
           <div class="header-left">
             <a href="#" class="logo" @click.prevent="navigateTo('home')">
@@ -278,10 +334,15 @@ onMounted(() => {
             </button>
           </div>
         </div>
+        
+        <!-- Centered Logo for Coming Soon -->
+        <div class="container cs-header-centered" v-else>
+          <img src="/logo/logo1.png" alt="Logo" class="logo-img" />
+        </div>
       </header>
 
       <!-- MOBILE BOTTOM NAVIGATION -->
-      <nav class="mobile-bottom-nav">
+      <nav class="mobile-bottom-nav" v-if="!isComingSoon">
         <!-- Home Section -->
         <a href="#hero" class="mobile-nav-item" @click.prevent="scrollToSection('hero')" :class="{ active: activeMobileTab === 'hero' && currentPage === 'home' }">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
@@ -297,9 +358,86 @@ onMounted(() => {
         </a>
       </nav>
 
-      <main>
+      <main :class="{ 'coming-soon-active': isComingSoon }">
+        <!-- ==================== PAGE: COMING SOON ==================== -->
+        <div v-if="isComingSoon" class="coming-soon-container">
+          <!-- Background and Characters Layered properly -->
+          <div class="cs-background">
+            <div class="cs-circle circle-1"></div>
+            <div class="cs-circle circle-2"></div>
+            <div class="cs-circle circle-3"></div>
+          </div>
+          
+          <div class="cs-characters">
+            <img src="/karakter/karakter.png" alt="Character 1" class="cs-char cs-char-1" />
+            <img src="/karakter/karakter (2).png" alt="Character 2" class="cs-char cs-char-2" />
+          </div>
+
+          <!-- Top Marquee (Under Header) -->
+          <div class="marquee-divider cs-top-marquee">
+            <div class="marquee-track smooth">
+              <span v-for="n in 15" :key="n">COMING SOON </span>
+            </div>
+          </div>
+
+          <div class="container cs-content">
+            <div class="cs-text-section">
+              <!-- <div class="cs-badge">Coming Soon</div> -->
+              <h1 class="cs-title">Something Delicious <br/><span>is Brewing!</span></h1>
+              <p class="cs-subtitle">
+                Kami sedang menyiapkan pengalaman kuliner terbaik untuk masa depan Anda. 
+                Tunggu kehadiran kami sebentar lagi!
+              </p>
+
+              <!-- Countdown -->
+              <div class="cs-countdown">
+                <div class="countdown-item">
+                  <span class="number">{{ timeLeft.days || 0 }}</span>
+                  <span class="label">Days</span>
+                </div>
+                <div class="countdown-item">
+                  <span class="number">{{ timeLeft.hours || 0 }}</span>
+                  <span class="label">Hours</span>
+                </div>
+                <div class="countdown-item">
+                  <span class="number">{{ timeLeft.minutes || 0 }}</span>
+                  <span class="label">Minutes</span>
+                </div>
+                <div class="countdown-item">
+                  <span class="number">{{ timeLeft.seconds || 0 }}</span>
+                  <span class="label">Seconds</span>
+                </div>
+              </div>
+
+              <!-- Registration Form -->
+              <div class="cs-form-container">
+                <div v-if="!isSubmitted" class="cs-form-wrapper">
+                  <h3>Get Notified When We Launch</h3>
+                  <form @submit.prevent="submitRegistration" class="cs-form">
+                    <input type="text" v-model="regForm.name" placeholder="Your Name" required />
+                    <input type="email" v-model="regForm.email" placeholder="Your Email Address" required />
+                    <button type="submit" class="btn btn-primary cs-submit-btn">Notify Me</button>
+                  </form>
+                </div>
+                <div v-else class="cs-success-msg">
+                  <div class="success-icon">✨</div>
+                  <h3>Terima kasih!</h3>
+                  <p>Kami akan mengirimkan notifikasi ke email Anda.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Bottom Marquee Loop -->
+          <!-- <div class="marquee-divider cs-bottom-marquee">
+            <div class="marquee-track smooth">
+              <span v-for="n in 15" :key="n">COMING SOON ✦ </span>
+            </div>
+          </div> -->
+        </div>
+
         <!-- ==================== PAGE: HOME ==================== -->
-        <div v-if="currentPage === 'home'">
+        <div v-if="currentPage === 'home' && !isComingSoon">
           
           <!-- Hero Section: Full Landscape with AI Restaurant Scene -->
           <section id="hero" class="hero-full">
@@ -753,7 +891,7 @@ onMounted(() => {
   align-items: center;
 }
 .logo-img {
-  height: 80px;
+  height: 100px;
   width: auto;
   object-fit: contain;
 }
@@ -1685,6 +1823,431 @@ onMounted(() => {
   color: var(--text-light);
   margin-bottom: 2.5rem;
 }
+/* ================= REFINED COMING SOON: LIQUID GLASS ================= */
+.cs-header-centered {
+  display: flex !important;
+  justify-content: center !important;
+  align-items: center !important;
+  height: clamp(60px, 10vh, 100px);
+  position: relative;
+  z-index: 1000;
+}
+.cs-header-centered .logo-img {
+  height: 60px;
+  filter: drop-shadow(0 4px 8px rgba(0,0,0,0.1));
+}
+
+.coming-soon-header {
+  background: transparent !important;
+  border-bottom: none !important;
+  position: fixed !important;
+  top: 0;
+  width: 100%;
+}
+
+.coming-soon-container {
+  position: relative;
+  height: 100vh;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: #fdfdfd;
+  overflow: hidden;
+  color: var(--text-dark);
+}
+
+/* 1. Deep Mesh Gradient Background */
+.cs-background {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background-color: #ffffff;
+  background-image: 
+    radial-gradient(at 0% 0%, hsla(12, 100%, 94%, 1) 0%, transparent 50%),
+    radial-gradient(at 100% 0%, hsla(180, 100%, 94%, 1) 0%, transparent 50%),
+    radial-gradient(at 100% 100%, hsla(240, 100%, 94%, 1) 0%, transparent 50%),
+    radial-gradient(at 0% 100%, hsla(300, 100%, 94%, 1) 0%, transparent 50%),
+    radial-gradient(at 50% 50%, hsla(45, 100%, 96%, 1) 0%, transparent 50%);
+  filter: blur(40px);
+  animation: meshFlow 20s infinite alternate ease-in-out;
+}
+
+/* 2. Floating Light Blobs */
+.cs-background::before, .cs-background::after {
+  content: '';
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(100px);
+  z-index: 1;
+  opacity: 0.4;
+  animation: floatBlobs 25s infinite alternate ease-in-out;
+}
+.cs-background::before {
+  width: 500px;
+  height: 500px;
+  background: var(--primary-light, #ffefed);
+  top: 20%;
+  left: 10%;
+}
+.cs-background::after {
+  width: 400px;
+  height: 400px;
+  background: #e0f2fe;
+  bottom: 20%;
+  right: 10%;
+  animation-delay: -5s;
+}
+
+@keyframes meshFlow {
+  0% { transform: scale(1); }
+  100% { transform: scale(1.1) rotate(2deg); }
+}
+
+@keyframes floatBlobs {
+  0% { transform: translate(0, 0); }
+  100% { transform: translate(150px, 100px); }
+}
+
+.cs-characters {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+.cs-char {
+  position: absolute;
+  width: clamp(280px, 35vw, 420px);
+  height: auto;
+  filter: drop-shadow(0 20px 40px rgba(0,0,0,0.15));
+}
+.cs-char-1 {
+  top: 22%;
+  left: -2%;
+  animation: floatChar 8s infinite ease-in-out;
+}
+.cs-char-2 {
+  bottom: 5%;
+  right: -2%;
+  animation: floatChar 8s infinite ease-in-out reverse;
+  animation-delay: 2s;
+}
+
+@keyframes floatChar {
+  0%, 100% { transform: translateY(0) rotate(-5deg) scale(1); }
+  50% { transform: translateY(-40px) rotate(5deg) scale(1.05); }
+}
+
+/* 3. Main Content Center */
+.cs-content {
+  position: relative;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  width: 100%;
+  padding-top: clamp(80px, 15vh, 120px);
+}
+
+.cs-text-section {
+  max-width: 900px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: clamp(0.25rem, 1vh, 0.75rem);
+}
+
+/* 4. Pulsing Badge */
+.cs-badge {
+  background: white;
+  color: var(--primary);
+  padding: 0.5rem 1.4rem;
+  border-radius: var(--radius-full);
+  font-weight: 800;
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+  border: 1px solid rgba(180, 42, 23, 0.15);
+  animation: pulseBadge 3s infinite ease-in-out;
+}
+
+@keyframes pulseBadge {
+  0%, 100% { transform: scale(1); box-shadow: 0 4px 15px rgba(0,0,0,0.05); }
+  50% { transform: scale(1.05); box-shadow: 0 8px 25px rgba(180, 42, 23, 0.15); }
+}
+
+/* 5. Shimmering Typography */
+.cs-title {
+  font-size: clamp(2.2rem, 6vw, 3.5rem);
+  font-weight: 950;
+  color: #1a1a1a;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  margin: 2rem 0 0.5rem;
+}
+.cs-title span {
+  position: relative;
+  background: linear-gradient(90deg, var(--primary) 0%, #ef4444 45%, #fca5a5 50%, #ef4444 55%, var(--primary) 100%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmerTitle 6s linear infinite;
+}
+
+@keyframes shimmerTitle {
+  to { background-position: 200% center; }
+}
+
+.cs-subtitle {
+  font-size: clamp(0.85rem, 1.2vw, 1rem);
+  color: #4b5563;
+  max-width: 500px;
+  line-height: 1.6;
+}
+
+/* 6. Liquid Glass Cards */
+.cs-countdown {
+  display: flex;
+  gap: clamp(0.7rem, 2vw, 1.2rem);
+  margin: 0.5rem 0;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.countdown-item {
+  background: rgba(255, 255, 255, 0.4);
+  backdrop-filter: blur(40px);
+  -webkit-backdrop-filter: blur(40px);
+  padding: clamp(0.6rem, 1.5vh, 1.2rem);
+  border-radius: 20px;
+  min-width: clamp(70px, 9vw, 100px);
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 15px 45px rgba(0,0,0,0.06), inset 0 0 0 1px rgba(255,255,255,0.4);
+  border: none;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.countdown-item:hover {
+  transform: translateY(-5px) scale(1.02);
+  background: rgba(255, 255, 255, 0.6);
+  box-shadow: 0 20px 50px rgba(0,0,0,0.1), inset 0 0 0 1.5px rgba(255,255,255,0.6);
+}
+.countdown-item .number {
+  font-size: clamp(1.8rem, 4vw, 3rem);
+  font-weight: 950;
+  color: var(--primary);
+  line-height: 1;
+}
+.countdown-item .label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  color: #6b7280;
+  font-weight: 700;
+  margin-top: 0.5rem;
+  letter-spacing: 0.05em;
+}
+
+/* Form Container High-End */
+.cs-form-container {
+  width: 100%;
+  max-width: 440px;
+  margin-top: 0.25rem;
+}
+.cs-form-wrapper {
+  background: rgba(255, 255, 255, 0.5);
+  backdrop-filter: blur(40px);
+  -webkit-backdrop-filter: blur(40px);
+  padding: clamp(1.2rem, 2.5vh, 2rem);
+  border-radius: 28px;
+  box-shadow: 0 20px 50px rgba(0,0,0,0.08), inset 0 0 0 1.5px rgba(255,255,255,0.4);
+  border: none;
+}
+.cs-form-wrapper h3 {
+  margin-bottom: 1rem;
+  font-size: clamp(1rem, 1.8vw, 1.2rem);
+  font-weight: 900;
+  color: #1a1a1a;
+}
+.cs-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+.cs-form input {
+  padding: 0.8rem 1.25rem;
+  border-radius: 12px;
+  border: 1.5px solid rgba(0,0,0,0.05);
+  background: rgba(255,255,255,0.8);
+  font-size: 0.95rem;
+  transition: all 0.3s;
+}
+.cs-form input:focus {
+  outline: none;
+  border-color: var(--primary);
+  background: #fff;
+  box-shadow: 0 0 0 6px rgba(180, 42, 23, 0.08);
+}
+.cs-submit-btn {
+  padding: 0.85rem;
+  font-size: 1.05rem;
+  border-radius: 12px;
+  font-weight: 800;
+  box-shadow: 0 10px 20px rgba(180, 42, 23, 0.2);
+}
+
+/* 7. Marquee Duo: Top & Bottom (Red Brand) */
+.cs-top-marquee {
+  position: absolute;
+  top: clamp(60px, 10vh, 90px);
+  background: var(--primary);
+  padding: 0.5rem 0;
+  border-bottom: 2px solid rgba(0,0,0,0.1);
+  color: #ffffff;
+  font-size: 0.8rem;
+  z-index: 100;
+  box-shadow: 0 4px 15px rgba(180, 42, 23, 0.2);
+}
+.cs-bottom-marquee {
+  position: absolute;
+  bottom: 0;
+  background: var(--primary);
+  padding: 0.75rem 0;
+  border-top: 2px solid rgba(0,0,0,0.1);
+  color: #ffffff;
+  font-size: 0.85rem;
+  z-index: 100;
+  box-shadow: 0 -4px 15px rgba(180, 42, 23, 0.2);
+}
+.cs-top-marquee .marquee-track span, .cs-bottom-marquee .marquee-track span {
+  padding: 0 2rem;
+  font-weight: 800;
+  opacity: 1;
+}
+
+.cs-success-msg {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(40px);
+  padding: 3rem;
+  border-radius: 32px;
+  box-shadow: 0 30px 70px rgba(34, 197, 94, 0.1), inset 0 0 0 1px rgba(255,255,255,0.5);
+}
+.success-icon {
+  font-size: 3.5rem;
+  margin-bottom: 1rem;
+  display: block;
+}
+
+@media (max-width: 768px) {
+  .cs-char {
+    display: block;
+    width: clamp(150px, 40vw, 190px);
+    opacity: 0.95;
+    z-index: 2;
+  }
+  .cs-char-1 {
+    top: 15%;
+    left: -12%;
+  }
+  .cs-char-2 {
+    top: 15%;
+    right: -12%;
+    bottom: auto;
+  }
+  .cs-header-centered {
+    height: 50px;
+  }
+  .cs-header-centered .logo-img {
+    height: 40px;
+  }
+  .cs-top-marquee {
+    top: 50px;
+    padding: 0.35rem 0;
+    font-size: 0.65rem;
+  }
+  .cs-bottom-marquee {
+    font-size: 0.65rem;
+    padding: 0.4rem 0;
+  }
+  .cs-content {
+    margin-top: 0.8rem;
+    padding-top: 0;
+  }
+  .cs-text-section {
+    gap: 0.4rem;
+  }
+  .cs-badge {
+    padding: 0.25rem 0.8rem;
+    font-size: 0.7rem;
+    margin-bottom: 0.1rem;
+  }
+  .cs-title {
+    font-size: 1.8rem;
+    line-height: 1.1;
+    margin-top: 1.2rem;
+  }
+  .cs-subtitle {
+    font-size: 0.75rem;
+    margin-bottom: 0.1rem;
+    line-height: 1.3;
+    max-width: 320px;
+  }
+  .cs-countdown {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.5rem;
+    width: 100%;
+    max-width: 340px;
+    margin: 0.6rem 0;
+  }
+  .countdown-item {
+    min-width: unset;
+    padding: 0.5rem;
+    border-radius: 12px;
+  }
+  .countdown-item .number {
+    font-size: 1.25rem;
+  }
+  .countdown-item .label {
+    font-size: 0.55rem;
+    margin-top: 0.2rem;
+  }
+  .cs-form-container {
+    margin-top: 0.1rem;
+  }
+  .cs-form-wrapper {
+    padding: 1rem;
+    border-radius: 20px;
+  }
+  .cs-form-wrapper h3 {
+    font-size: 0.95rem;
+    margin-bottom: 0.6rem;
+  }
+  .cs-form {
+    gap: 0.5rem;
+  }
+  .cs-form input {
+    padding: 0.6rem 0.8rem;
+    font-size: 0.85rem;
+    border-radius: 10px;
+  }
+  .cs-submit-btn {
+    padding: 0.6rem;
+    font-size: 0.95rem;
+    border-radius: 10px;
+  }
+  .cs-success-msg {
+    padding: 1.5rem 1rem;
+  }
+  .cs-bottom-marquee {
+    font-size: 0.7rem;
+    padding: 0.5rem 0;
+  }
+}
+
 .invoice-details {
   background: var(--secondary);
   padding: 1.5rem;
@@ -1753,8 +2316,11 @@ onMounted(() => {
     gap: 0.5rem;
   }
   .logo {
-    font-size: 1.25rem;
-    white-space: nowrap;
+    display: flex;
+    align-items: center;
+  }
+  .logo-img {
+    height: 60px;
   }
   .page-header {
     margin-bottom: 1.5rem;
@@ -1808,8 +2374,11 @@ onMounted(() => {
   .card-desc {
     font-size: 0.75rem !important;
     margin-bottom: 0.75rem !important;
+    display: -webkit-box;
     -webkit-line-clamp: 2;
     line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
   }
   .price {
     font-size: 0.9rem !important;
