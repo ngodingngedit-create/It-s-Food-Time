@@ -1,5 +1,8 @@
 <script setup>
 import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import { db } from './firebase'
+import { collection, addDoc, getDocs } from 'firebase/firestore'
+import emailjs from '@emailjs/browser'
 
 // --- State ---
 const isAppLoading = ref(true)
@@ -181,7 +184,7 @@ const scrollToSection = (id) => {
 }
 
 // --- Coming Soon State ---
-const isComingSoon = ref(true)
+const isComingSoon = ref(false)
 const countdownDate = new Date('2026-05-01T00:00:00').getTime()
 const timeLeft = ref({
   days: 0,
@@ -213,15 +216,75 @@ const updateCountdown = () => {
   }
 }
 
-const submitRegistration = () => {
+const submitRegistration = async () => {
   if (regForm.value.name && regForm.value.email) {
-    console.log('Registration submitted:', regForm.value)
-    isSubmitted.value = true
-    setTimeout(() => {
-      isSubmitted.value = false
-      regForm.value = { name: '', email: '' }
-    }, 3000)
+    try {
+      // 1. Save to Firebase
+      await addDoc(collection(db, "subscribers"), {
+        name: regForm.value.name,
+        email: regForm.value.email,
+        subscribedAt: new Date().toISOString(),
+        status: 'pending'
+      });
+
+      // 2. Send immediate confirmation via EmailJS (Optional)
+      // Note: You need to set these IDs in your EmailJS account
+      /*
+      emailjs.send('YOUR_SERVICE_ID', 'YOUR_TEMPLATE_ID', {
+        to_name: regForm.value.name,
+        to_email: regForm.value.email,
+      }, 'YOUR_PUBLIC_KEY');
+      */
+
+      console.log('Registration saved to Firebase:', regForm.value)
+      isSubmitted.value = true
+      
+      setTimeout(() => {
+        isSubmitted.value = false
+        regForm.value = { name: '', email: '' }
+      }, 3000)
+    } catch (error) {
+      console.error("Error saving subscriber:", error);
+      alert("Maaf, terjadi kesalahan. Silakan coba lagi.");
+    }
   }
+}
+
+// Function to notify all subscribers when site launches
+// You can call this from the browser console: window.broadcastLaunch()
+const broadcastLaunchNotification = async () => {
+  const confirmLaunch = confirm("Apakah Anda yakin ingin mengirim notifikasi peluncuran ke SEMUA pelanggan?");
+  if (!confirmLaunch) return;
+
+  try {
+    const querySnapshot = await getDocs(collection(db, "subscribers"));
+    const subscribers = [];
+    querySnapshot.forEach((doc) => {
+      subscribers.push(doc.data());
+    });
+
+    console.log(`Sending notifications to ${subscribers.length} subscribers...`);
+    
+    // Iterate and send via EmailJS
+    for (const sub of subscribers) {
+      /*
+      await emailjs.send('YOUR_SERVICE_ID', 'LAUNCH_TEMPLATE_ID', {
+        to_name: sub.name,
+        to_email: sub.email,
+      }, 'YOUR_PUBLIC_KEY');
+      */
+      console.log(`Notified: ${sub.email}`);
+    }
+
+    alert(`Berhasil mengirim notifikasi ke ${subscribers.length} pelanggan!`);
+  } catch (error) {
+    console.error("Error broadcasting:", error);
+  }
+}
+
+// Expose to window for manual trigger during dev
+if (typeof window !== 'undefined') {
+  window.broadcastLaunch = broadcastLaunchNotification;
 }
 
 let countdownInterval = null
