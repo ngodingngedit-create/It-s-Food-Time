@@ -3,6 +3,7 @@ import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { db } from './firebase'
 import { collection, addDoc, getDocs } from 'firebase/firestore'
 import emailjs from '@emailjs/browser'
+import { supabase } from './supabase'
 
 // --- State ---
 const isAppLoading = ref(true)
@@ -14,59 +15,67 @@ const selectedFood = ref(null)
 const tempQuantity = ref(1)
 const activeMobileTab = ref('hero')
 
+// Auth and Dashboard
+const isLoggedIn = ref(false)
+const currentUser = ref(null)
+const loginForm = ref({
+  email: '',
+  password: ''
+})
+const isDashboardLoading = ref(false)
+const dashboardTransactions = ref([])
+const activeDashboardTab = ref('transactions')
+
+// New state for dynamic invoice
+const invoiceData = ref(null)
+const isInvoiceLoading = ref(false)
+const newProductForm = ref({
+  name: '',
+  description: '',
+  category: 'Main Course',
+  price: 0,
+  stock: 0,
+  variant: '',
+  image_url: ''
+})
+
 // Form states
+const editingProduct = ref(null)
+const isEditModalOpen = ref(false)
+
 const checkoutForm = ref({
   name: '',
   phone: '',
-  address: '',
+  email: '',
   paymentMethod: 'qris'
 })
 const orderId = ref('')
 
 // --- Data ---
-const categories = ['All', 'Main Course', 'Snacks', 'Drinks']
+const categories = ['All', 'Dish Utama', 'Sidedish', 'Drinks']
 
-const menu = ref([
-  //main course
-  { id: 1, name: 'Rice Bowl Chicken Popcorn', desc: 'Nasi hangat dengan ayam popcorn yang gurih dan saus pilihan.', price: 15000, category: 'Main Course', popular: true, img: '/maincourse/ricebowl.png' },
-  { id: 3, name: 'Fried Dimsum', desc: 'Dimsum goreng dengan isian daging ayam dan udang yang juicy gurih dan lezat dan juga keju didalam yang lumer.', price: 7000, category: 'Main Course', popular: false, img: '/maincourse/dimsum.png' },
-  { id: 2, name: 'Kimbab', desc: 'Gulungan nasi dengan isian segar seperti timun, wortel, crabstick, dan selada hijau, menghadirkan perpaduan rasa ringan, gurih, dan menyegarkan di setiap gigitan.', price: 12000, category: 'Main Course', popular: true, img: '/maincourse/kimbab.png' },
-  
-  //drinks
-  { id: 4, name: 'Brazilian Lemonade', desc: 'Minuman segar dengan rasa lemon yang khas dan menyegarkan.', price: 8000, category: 'Drinks', popular: true, img: '/drinks/brazilianlemonade.png' },
-
-  //snacks
-  { id: 5, name: 'Makaroni Kering', desc: 'Cemilan gurih dan renyah dengan bumbu pilihan yang bikin nagih di setiap gigitan.', price: 8000, category: 'Snacks', popular: true, img: '/snacks/makaroni.png' },
-  { id: 6, name: 'Jagung (marning)', desc: 'Jagung kering yang digoreng renyah dengan rasa gurih khas yang simpel tapi addictive.', price: 8000, category: 'Snacks', popular: false, img: '/snacks/jagung.png' },
-  { id: 7, name: 'Basreng', desc: 'Bakso goreng dengan tekstur kriuk dan bumbu pedas gurih yang kuat.', price: 8000, category: 'Snacks', popular: false, img: '/snacks/basreng.png' },
-  { id: 8, name: 'Keripik Pisang', desc: 'Irisan pisang tipis yang digoreng renyah dengan rasa manis alami dan ringan.', price: 8000, category: 'Snacks', popular: false, img: '/snacks/keripikpisanng.png' },
-  {  id: 9, name: 'Kuping Gajah', desc: 'Cemilan tradisional renyah dengan perpaduan rasa manis dan gurih yang khas.', price: 8000, category: 'Snacks', popular: false, img: '/snacks/kupinggajah.png'},
-  { id: 10, name: 'Jasuke', desc: 'Jagung susu keju dengan rasa manis dan gurih yang khas.', price: 7000, category: 'Snacks', popular: false, img: '/snacks/jasuke.png'}
-])
-
-const bundles = ref([
-  { id: 101, name: 'Paket Ngampus', desc: 'Rice bowl + Brazilian Lemonade', price: 20000, oldPrice: 23000, img: '/bundling/paketngampus.png' },
-  { id: 102, name: 'Paket Jajan', desc: 'Dimsum Goreng Keju + Brazilian Lemonade', price: 21000, oldPrice: 23000, img: '/bundling/paketjajn.png' },
-  { id: 103, name: 'Paket Nyemil', desc: 'Jagung Susu Keju + Brazilian Lemonade', price: 13000, oldPrice: 15000, img: '/bundling/paketnyemil.png'},
-  { id: 104, name: 'Paket Kenyang', desc: 'Rice Bowl + Dimsum Goreng Keju + Jagung Susu Keju', price: 33000, oldPrice: 37000, img: '/bundling/paketnongkrongbareng.png'},
-  { id: 105, name: 'Paket Traktir', desc: 'Rice Bowl + Dimsum Goreng Keju + Jagung Susu Keju + Brazilian Lemonade', price: 40000, oldPrice: 45000, img: '/bundling/pakettraktir.jpg'}
-])
+const menu = ref([])
+const bundles = computed(() => {
+  return menu.value.filter(item => item.category === 'Bundling')
+})
 
 const cart = ref([])
 
 // --- Computeds ---
 const filteredMenu = computed(() => {
   if (activeCategory.value === 'All') {
-    return menu.value.filter(item => item.popular)
+    // Show popular items, but exclude Bundling category
+    return menu.value.filter(item => item.popular && item.category !== 'Bundling')
   }
   return menu.value.filter(item => item.category === activeCategory.value)
 })
 
 const categorizedMenu = computed(() => {
   return {
-    'Main Course': menu.value.filter(i => i.category === 'Main Course'),
-    'Snacks': menu.value.filter(i => i.category === 'Snacks'),
-    'Drinks': menu.value.filter(i => i.category === 'Drinks')
+    'Dish Utama': menu.value.filter(i => i.category === 'Dish Utama' || i.category === 'Main Course'),
+    'Sidedish': menu.value.filter(i => i.category === 'Sidedish' || i.category === 'Snacks'),
+    'Drinks': menu.value.filter(i => i.category === 'Drinks'),
+    'Bundling': menu.value.filter(i => i.category === 'Bundling')
   }
 })
 
@@ -102,6 +111,45 @@ const addSelectedToCart = () => {
   selectedFood.value = null // close modal
 }
 
+// Product CRUD Methods
+const handleDeleteProduct = async (id) => {
+  if (!confirm('Are you sure you want to delete this product?')) return
+  try {
+    await supabase.delete('products', `id=eq.${id}`)
+    alert('Product deleted successfully!')
+    fetchProducts()
+  } catch (err) {
+    console.error('Delete error:', err)
+    alert('Failed to delete product')
+  }
+}
+
+const openEditModal = (product) => {
+  editingProduct.value = { ...product }
+  isEditModalOpen.value = true
+}
+
+const handleUpdateProduct = async () => {
+  try {
+    const id = editingProduct.value.id
+    const updateData = {
+      name: editingProduct.value.name,
+      desc: editingProduct.value.desc,
+      category: editingProduct.value.category,
+      price: editingProduct.value.price,
+      stock: editingProduct.value.stock,
+      popular: editingProduct.value.popular
+    }
+    await supabase.patch('products', `id=eq.${id}`, updateData)
+    alert('Product updated successfully!')
+    isEditModalOpen.value = false
+    fetchProducts()
+  } catch (err) {
+    console.error('Update error:', err)
+    alert('Failed to update product')
+  }
+}
+
 const addDirectToCart = (item) => {
   const existing = cart.value.find(i => i.id === item.id)
   if (existing) {
@@ -125,6 +173,10 @@ const navigateTo = (page) => {
   currentPage.value = page
   isCartOpen.value = false
   window.scrollTo({ top: 0, behavior: 'smooth' })
+  
+  // Update URL manually for "pseudo-routing"
+  const path = page === 'home' || page === 'hero' ? '/' : `/${page}`
+  window.history.pushState(null, '', path)
 }
 
 const proceedToCheckout = () => {
@@ -132,15 +184,46 @@ const proceedToCheckout = () => {
   navigateTo('checkout')
 }
 
-const processPayment = () => {
-  if (!checkoutForm.value.name || !checkoutForm.value.address) {
+const processPayment = async () => {
+  if (!checkoutForm.value.name || !checkoutForm.value.email || !checkoutForm.value.phone) {
     alert("Mohon lengkapi data pengiriman Anda.")
     return
   }
   
-  // Generate random order ID
-  orderId.value = 'ORD-' + Math.floor(100000 + Math.random() * 900000)
-  navigateTo('invoice')
+  isAppLoading.value = true // Show loader during process
+  try {
+    const payload = {
+      customer: {
+        name: checkoutForm.value.name,
+        email: checkoutForm.value.email,
+        phone: checkoutForm.value.phone
+      },
+      items: cart.value.map(item => ({
+        product_id: item.id,
+        qty: item.quantity
+      }))
+    }
+
+    const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/checkout`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+
+    const result = await response.json()
+
+    if (result.success && result.redirect_url) {
+      cart.value = []
+      window.location.href = result.redirect_url
+    } else {
+      throw new Error(result.message || 'Gagal memproses pembayaran')
+    }
+  } catch (error) {
+    console.error('Checkout error:', error)
+    alert('Terjadi kesalahan saat memproses pesanan: ' + error.message)
+  } finally {
+    isAppLoading.value = false
+  }
 }
 
 const processWhatsAppOrder = () => {
@@ -148,7 +231,7 @@ const processWhatsAppOrder = () => {
   text += `*Order ID:* ${orderId.value}\n`
   text += `*Nama:* ${checkoutForm.value.name}\n`
   text += `*No HP:* ${checkoutForm.value.phone}\n`
-  text += `*Alamat Pengiriman:* ${checkoutForm.value.address}\n`
+  text += `*Email:* ${checkoutForm.value.email}\n`
   text += `*Metode Pembayaran:* ${checkoutForm.value.paymentMethod.toUpperCase()}\n\n`
   text += `*Detail Pesanan:*\n`
   
@@ -283,8 +366,180 @@ const broadcastLaunchNotification = async () => {
 }
 
 // Expose to window for manual trigger during dev
+// Expose to window for manual trigger during dev
 if (typeof window !== 'undefined') {
   window.broadcastLaunch = broadcastLaunchNotification;
+}
+
+// --- Supabase Methods ---
+const fetchProducts = async () => {
+  try {
+    const data = await supabase.get('products')
+    // Map Supabase products to App structure
+    menu.value = data.map(p => {
+      let imageName = '/logo/logo1.png'
+      const lowerName = p.name.toLowerCase().replace(/\s/g, '')
+      const cat = p.category ? p.category.toLowerCase() : ''
+      
+      if (p.image_url || p.img) {
+        imageName = p.image_url || p.img
+      } else {
+        // Map category names to folder names
+        let folder = ''
+        if (cat.includes('bundling')) folder = 'bundling'
+        else if (cat.includes('utama') || cat.includes('main')) folder = 'maincourse'
+        else if (cat.includes('sidedish') || cat.includes('snack')) folder = 'snacks'
+        else if (cat.includes('drink')) folder = 'drinks'
+
+        // Specific overrides and filename handling
+        let fileName = lowerName
+        if (lowerName.includes('dimsum')) {
+          folder = 'maincourse'
+          fileName = 'dimsum'
+        } else if (lowerName.includes('lemonade')) {
+          folder = 'drinks'
+          fileName = 'brazilianlemonade'
+        } else if (lowerName.includes('ricebowl')) {
+          folder = 'maincourse'
+          fileName = 'ricebowl'
+        } else if (lowerName.includes('jasuke')) {
+          folder = 'snacks'
+          fileName = 'jasuke'
+        }
+
+        if (folder) {
+          imageName = `/${folder}/${fileName}.png`
+        }
+      }
+
+      return {
+        id: p.id || p.product_id,
+        name: p.name,
+        desc: p.description || p.desc,
+        price: p.price,
+        stock: p.stock || 0,
+        variant: p.variant || '',
+        category: p.category,
+        popular: p.popular !== undefined ? p.popular : true,
+        img: imageName
+      }
+    })
+    
+    // bundles now derived automatically via computed from menu
+  } catch (error) {
+    console.error('Error fetching products:', error)
+  }
+}
+
+const handleLogin = async () => {
+  if (!loginForm.value.email || !loginForm.value.password) return
+  
+  try {
+    const users = await supabase.get('users')
+    const user = users.find(u => u.email === loginForm.value.email && u.password === loginForm.value.password)
+    
+    if (user) {
+      isLoggedIn.value = true
+      currentUser.value = user
+      navigateTo('dashboard')
+      fetchDashboardTransactions()
+    } else {
+      alert('Email atau password salah.')
+    }
+  } catch (error) {
+    console.error('Login error:', error)
+    alert('Terjadi kesalahan saat login.')
+  }
+}
+
+const fetchDashboardTransactions = async () => {
+  isDashboardLoading.value = true
+  try {
+    const transactions = await supabase.get('transactions')
+    dashboardTransactions.value = transactions
+  } catch (error) {
+    console.error('Error fetching dashboard data:', error)
+  } finally {
+    isDashboardLoading.value = false
+  }
+}
+
+const fetchInvoiceDetail = async (invNumber) => {
+  if (!invNumber) return
+  isInvoiceLoading.value = true
+  try {
+    // We search by invoice_number column
+    const endpoint = `transactions?invoice_number=eq.${invNumber}&select=*,transaction_items(*,products(*))`
+    const data = await supabase.get(endpoint)
+    
+    if (data && data.length > 0) {
+      const transaction = data[0]
+      // Map it to a clean object
+      invoiceData.value = {
+        id: transaction.invoice_number,
+        date: new Date(transaction.created_at).toLocaleDateString(),
+        method: transaction.payment_method,
+        status: transaction.payment_status,
+        customer_name: transaction.customers?.name || 'Customer', // Backend should ideally join this if needed
+        items: transaction.transaction_items.map(ti => ({
+          name: ti.products?.name || 'Product',
+          quantity: ti.qty,
+          price: ti.price,
+          subtotal: ti.subtotal
+        })),
+        total: transaction.transaction_items.reduce((sum, i) => sum + i.subtotal, 0)
+      }
+    }
+  } catch (error) {
+    console.error('Error fetching invoice:', error)
+  } finally {
+    isInvoiceLoading.value = false
+  }
+}
+
+const handleLogout = () => {
+  isLoggedIn.value = false
+  currentUser.value = null
+  navigateTo('home')
+}
+
+const handleAddProduct = async () => {
+  if (!newProductForm.value.name || newProductForm.value.price <= 0) {
+    alert('Nama produk dan harga harus diisi.')
+    return
+  }
+
+  isDashboardLoading.value = true
+  try {
+    await supabase.post('products', {
+      name: newProductForm.value.name,
+      description: newProductForm.value.description,
+      category: newProductForm.value.category,
+      price: newProductForm.value.price,
+      stock: newProductForm.value.stock,
+      variant: newProductForm.value.variant,
+      image_url: newProductForm.value.image_url
+    })
+
+    alert('Produk berhasil ditambahkan!')
+    // Reset form
+    newProductForm.value = {
+      name: '',
+      description: '',
+      category: 'Main Course',
+      price: 0,
+      stock: 0,
+      variant: ''
+    }
+    // Refresh products list
+    fetchProducts()
+    activeDashboardTab.value = 'transactions' // Return to transactions or stay? Let's stay for now or go to list if I had one.
+  } catch (error) {
+    console.error('Error adding product:', error)
+    alert('Gagal menambahkan produk.')
+  } finally {
+    isDashboardLoading.value = false
+  }
 }
 
 let countdownInterval = null
@@ -338,6 +593,25 @@ onMounted(() => {
   updateCountdown()
   countdownInterval = setInterval(updateCountdown, 1000)
   
+  fetchProducts()
+  
+  // Handle routes based on URL path
+  const path = window.location.pathname
+  const params = new URLSearchParams(window.location.search)
+  const orderIdFromUrl = params.get('order_id')
+
+  if (path === '/login-admin') {
+    currentPage.value = 'login'
+  } else if (path === '/invoice') {
+    currentPage.value = 'invoice'
+    if (orderIdFromUrl) {
+      orderId.value = orderIdFromUrl
+      fetchInvoiceDetail(orderIdFromUrl)
+    }
+  } else if (path === '/all-menu') {
+    currentPage.value = 'all-menu'
+  }
+  
   setTimeout(() => {
     isAppLoading.value = false
     setTimeout(() => {
@@ -379,15 +653,15 @@ onMounted(() => {
           
           <div class="header-center hidden-mobile">
             <nav class="desktop-nav">
-              <a href="#hero" @click.prevent="navigateTo('home'); setTimeout(() => { window.location.hash='hero' }, 100)" class="nav-link">Home</a>
-              <a href="#menu" @click.prevent="navigateTo('home'); setTimeout(() => { window.location.hash='menu' }, 100)" class="nav-link">Menu</a>
-              <a href="#bundles" @click.prevent="navigateTo('home'); setTimeout(() => { window.location.hash='bundles' }, 100)" class="nav-link">Bundles</a>
+              <a href="#" @click.prevent="navigateTo('home')" class="nav-link">Home</a>
+              <a href="#" @click.prevent="navigateTo('all-menu')" class="nav-link">Menu</a>
+              <a href="#bundles" @click.prevent="scrollToSection('bundles')" class="nav-link">Bundles</a>
             </nav>
           </div>
           
           <!-- Action Buttons -->
           <div class="header-right">
-            <button class="cart-btn" @click="navigateTo('cart')">
+            <button class="cart-btn" @click="navigateTo('cart')" v-if="!isLoggedIn && !isComingSoon">
               <span class="cart-label hidden-mobile">Cart</span>
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/>
@@ -395,6 +669,13 @@ onMounted(() => {
               </svg>
               <div class="cart-badge" v-if="cart.length > 0">{{ cart.length }}</div>
             </button>
+            <!-- Login Button Hidden (Access via /login-admin), visible only if logged in -->
+            <button class="user-btn" @click="navigateTo('dashboard')" v-if="isLoggedIn && !isComingSoon" title="Dashboard">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                <circle cx="12" cy="7" r="4"></circle>
+              </svg>
+            </button> 
           </div>
         </div>
         
@@ -600,7 +881,6 @@ onMounted(() => {
                       <p>{{ bundle.desc }}</p>
                       <div class="price-row">
                         <span class="price">{{ formatPrice(bundle.price) }}</span>
-                        <span class="old-price">{{ formatPrice(bundle.oldPrice) }}</span>
                       </div>
                     </div>
                     <button class="btn btn-primary bundle-btn" @click.stop="openFoodDetail(bundle)">
@@ -700,8 +980,8 @@ onMounted(() => {
                     <input type="tel" v-model="checkoutForm.phone" placeholder="0812xxxxxx" required />
                   </div>
                   <div class="form-group">
-                    <label>Complete Address</label>
-                    <textarea v-model="checkoutForm.address" placeholder="Student Dormitory Block C, Room 101" rows="3" required></textarea>
+                    <label>Email Address</label>
+                    <input type="email" v-model="checkoutForm.email" placeholder="john@example.com" required />
                   </div>
                 </div>
                 <div class="form-section mt-4">
@@ -743,33 +1023,44 @@ onMounted(() => {
         <!-- ==================== PAGE: INVOICE ==================== -->
         <div class="page-container" v-else-if="currentPage === 'invoice'">
           <div class="container invoice-content">
-            <div class="invoice-card">
+            <div v-if="isInvoiceLoading" class="invoice-loading-state">
+              <div class="spinner"></div>
+              <p>Fetching your order details...</p>
+            </div>
+            <div v-else-if="invoiceData" class="invoice-card">
               <div class="success-icon">✓</div>
               <h2>Order Confirmed!</h2>
               <p class="invoice-subtitle">Thank you for ordering with IT's Food Time</p>
               <div class="invoice-details">
-                <div class="invoice-row"><span class="label">Order ID:</span><span class="value order-id">{{ orderId }}</span></div>
-                <div class="invoice-row"><span class="label">Date:</span><span class="value">{{ new Date().toLocaleDateString() }}</span></div>
-                <div class="invoice-row"><span class="label">Payment Method:</span><span class="value capitalize">{{ checkoutForm.paymentMethod }}</span></div>
+                <div class="invoice-row"><span class="label">Order ID:</span><span class="value order-id">{{ invoiceData.id }}</span></div>
+                <div class="invoice-row"><span class="label">Date:</span><span class="value">{{ invoiceData.date }}</span></div>
+                <div class="invoice-row"><span class="label">Status:</span><span class="value capitalize" :class="invoiceData.status">{{ invoiceData.status }}</span></div>
+                <div class="invoice-row"><span class="label">Payment Method:</span><span class="value capitalize">{{ invoiceData.method }}</span></div>
               </div>
               <div class="invoice-items">
                 <h4>Items Ordered</h4>
-                <div class="summary-row text-sm" v-for="item in cart" :key="item.id">
+                <div class="summary-row text-sm" v-for="item in invoiceData.items" :key="item.name">
                   <span>{{ item.quantity }}x {{ item.name }}</span>
                   <span>{{ formatPrice(item.price * item.quantity) }}</span>
                 </div>
                 <hr class="summary-divider mt-3" />
                 <div class="summary-row total">
                   <span>Total Paid</span>
-                  <span>{{ formatPrice(cartTotal) }}</span>
+                  <span>{{ formatPrice(invoiceData.total) }}</span>
                 </div>
               </div>
               <div class="invoice-actions">
                 <button class="btn btn-primary wa-btn w-full" @click="processWhatsAppOrder">
                   Send Invoice via WhatsApp
                 </button>
-                <button class="btn btn-outline w-full mt-3" @click="navigateTo('home'); cart=[]">Back to Home</button>
+                <button class="btn btn-outline w-full mt-3" @click="navigateTo('home'); invoiceData=null; cart=[]">Back to Home</button>
               </div>
+            </div>
+            <div v-else class="invoice-card error-state">
+              <div class="error-icon">❌</div>
+              <h2>Invoice Not Found</h2>
+              <p>We couldn't retrieve the details for order <strong>{{ orderId }}</strong>.</p>
+              <button class="btn btn-primary mt-4" @click="navigateTo('home')">Back to Menu</button>
             </div>
           </div>
         </div>
@@ -813,6 +1104,192 @@ onMounted(() => {
           </div>
         </div>
 
+        <!-- ==================== PAGE: LOGIN ==================== -->
+        <div class="page-container" v-else-if="currentPage === 'login'">
+          <div class="container login-content">
+            <div class="login-card animate-fade-up">
+              <div class="login-header-section">
+                <h2>Welcome Back 🍕</h2>
+                <p>Login to access your dashboard</p>
+              </div>
+              <form @submit.prevent="handleLogin" class="login-form-ui">
+                <div class="form-group">
+                  <label>Email Address</label>
+                  <input type="email" v-model="loginForm.email" placeholder="admin@mail.com" required />
+                </div>
+                <div class="form-group">
+                  <label>Password</label>
+                  <input type="password" v-model="loginForm.password" placeholder="••••••••" required />
+                </div>
+                <button type="submit" class="btn btn-primary w-full">Login</button>
+              </form>
+              <button class="btn btn-outline w-full mt-3" @click="navigateTo('home')">Back to Home</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ==================== PAGE: DASHBOARD ==================== -->
+        <div class="page-container" v-else-if="currentPage === 'dashboard'">
+          <div class="container dashboard-content">
+            <div class="dashboard-header-ui animate-fade-up">
+              <div class="user-greeting">
+                <h1>Hello, {{ currentUser?.name || 'Admin' }}! 👋</h1>
+                <p>Manage your food business orders here.</p>
+              </div>
+              <div class="dashboard-header-actions">
+                <div class="dashboard-tabs">
+                  <button class="tab-btn" :class="{ active: activeDashboardTab === 'transactions' }" @click="activeDashboardTab = 'transactions'">Transactions</button>
+                  <button class="tab-btn" :class="{ active: activeDashboardTab === 'manage-products' }" @click="activeDashboardTab = 'manage-products'">Product List</button>
+                  <button class="tab-btn" :class="{ active: activeDashboardTab === 'add-product' }" @click="activeDashboardTab = 'add-product'">Add Product</button>
+                </div>
+                <button class="btn btn-outline" @click="handleLogout">Logout</button>
+              </div>
+            </div>
+
+            <!-- TAB: TRANSACTIONS -->
+            <div v-if="activeDashboardTab === 'transactions'">
+              <div class="dashboard-stats animate-fade-up delay-100">
+                <div class="stat-card">
+                  <span class="stat-icon">💰</span>
+                  <div class="stat-info">
+                    <span class="stat-label">Total Orders</span>
+                    <span class="stat-value">{{ dashboardTransactions.length }}</span>
+                  </div>
+                </div>
+                <div class="stat-card">
+                  <span class="stat-icon">✅</span>
+                  <div class="stat-info">
+                    <span class="stat-label">Pending</span>
+                    <span class="stat-value">{{ dashboardTransactions.filter(t => t.payment_status === 'pending').length }}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="recent-orders-section animate-fade-up delay-200">
+                <h3>Recent Transactions</h3>
+                <div v-if="isDashboardLoading" class="dashboard-loading">
+                  <div class="spinner"></div>
+                  <p>Loading transactions...</p>
+                </div>
+                <div v-else-if="dashboardTransactions.length > 0" class="orders-table-wrapper responsive-table">
+                  <table class="orders-table">
+                    <thead>
+                      <tr>
+                        <th>Invoice</th>
+                        <th>Phone</th>
+                        <th>Email</th>
+                        <th>Status</th>
+                        <th>Method</th>
+                        <th>Date</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="t in dashboardTransactions" :key="t.transaction_id">
+                        <td class="font-bold">{{ t.invoice_number }}</td>
+                        <td>{{ t.phone }}</td>
+                        <td>{{ t.email }}</td>
+                        <td><span class="badge-status" :class="t.payment_status">{{ t.payment_status }}</span></td>
+                        <td class="capitalize">{{ t.payment_method }}</td>
+                        <td class="date-cell">{{ new Date(t.created_at).toLocaleDateString() }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div v-else class="empty-dashboard">
+                  <p>No transactions found yet.</p>
+                </div>
+              </div>
+            </div>
+            
+            <!-- TAB: MANAGE PRODUCTS -->
+            <div v-else-if="activeDashboardTab === 'manage-products'" class="manage-products-container animate-fade-up">
+              <div class="recent-orders-section">
+                <div class="section-header-flex">
+                  <h3>Product List</h3>
+                  <p>{{ menu.length }} products available</p>
+                </div>
+                
+                <div class="orders-table-wrapper responsive-table">
+                  <table class="orders-table">
+                    <thead>
+                      <tr>
+                        <th>Product</th>
+                        <th>Category</th>
+                        <th>Price</th>
+                        <th>Stock</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="item in menu" :key="item.id">
+                        <td>
+                          <div class="product-cell">
+                            <img :src="item.img" class="mini-thumb" />
+                            <span>{{ item.name }}</span>
+                          </div>
+                        </td>
+                        <td><span class="badge-cat">{{ item.category }}</span></td>
+                        <td>{{ formatPrice(item.price) }}</td>
+                        <td>{{ item.stock }}</td>
+                        <td>
+                          <div class="action-btns-list">
+                            <button class="btn-icon-small edit" @click="openEditModal(item)">✎</button>
+                            <button class="btn-icon-small delete" @click="handleDeleteProduct(item.id)">✕</button>
+                          </div>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <!-- TAB: ADD PRODUCT -->
+            <div v-else-if="activeDashboardTab === 'add-product'" class="add-product-container animate-fade-up">
+              <div class="admin-form-card">
+                <h3>Add New Product</h3>
+                <form @submit.prevent="handleAddProduct" class="admin-form">
+                  <div class="admin-form-grid">
+                    <div class="form-group">
+                      <label>Product Name</label>
+                      <input type="text" v-model="newProductForm.name" placeholder="e.g. Sate Ayam" required />
+                    </div>
+                    <div class="form-group">
+                      <label>Category</label>
+                      <select v-model="newProductForm.category">
+                        <option v-for="cat in categories.filter(c => c !== 'All')" :key="cat" :value="cat">{{ cat }}</option>
+                      </select>
+                    </div>
+                    <div class="form-group">
+                      <label>Price (IDR)</label>
+                      <input type="number" v-model="newProductForm.price" placeholder="15000" required />
+                    </div>
+                    <div class="form-group">
+                      <label>Stock</label>
+                      <input type="number" v-model="newProductForm.stock" placeholder="10" required />
+                    </div>
+                  </div>
+                  <div class="form-group">
+                    <label>Description</label>
+                    <textarea v-model="newProductForm.description" placeholder="Short description of the product..." rows="3"></textarea>
+                  </div>
+                  <div class="form-group">
+                    <label>Variant / Notes</label>
+                    <input type="text" v-model="newProductForm.variant" placeholder="e.g. Extra Spicy, Large, etc." />
+                  </div>
+                  <div class="form-group">
+                    <label>Image URL (Optional)</label>
+                    <input type="text" v-model="newProductForm.image_url" placeholder="/bundling/paketgeprek.png" />
+                  </div>
+                  <button type="submit" class="btn btn-primary" :disabled="isDashboardLoading">
+                    {{ isDashboardLoading ? 'Adding...' : 'Save Product' }}
+                  </button>
+                </form>
+              </div>
+            </div>
+          </div>
+        </div>
+
       </main>
 
       <!-- DETAIL MODAL OVERLAY -->
@@ -839,6 +1316,51 @@ onMounted(() => {
           </div>
         </div>
       </div>
+
+      <!-- EDIT PRODUCT MODAL -->
+      <div class="modal-overlay" v-if="isEditModalOpen" @click.self="isEditModalOpen = false">
+        <div class="edit-modal-card">
+          <div class="modal-header">
+            <h3>Edit Product</h3>
+            <button class="close-modal" @click="isEditModalOpen = false">×</button>
+          </div>
+          <form @submit.prevent="handleUpdateProduct" class="admin-form">
+            <div class="admin-form-grid">
+              <div class="form-group">
+                <label>Product Name</label>
+                <input type="text" v-model="editingProduct.name" required />
+              </div>
+              <div class="form-group">
+                <label>Category</label>
+                <select v-model="editingProduct.category">
+                  <option v-for="cat in categories.filter(c => c !== 'All')" :key="cat" :value="cat">{{ cat }}</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Price (IDR)</label>
+                <input type="number" v-model="editingProduct.price" required />
+              </div>
+              <div class="form-group">
+                <label>Stock</label>
+                <input type="number" v-model="editingProduct.stock" required />
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Description</label>
+              <textarea v-model="editingProduct.desc" rows="3"></textarea>
+            </div>
+            <div class="form-group">
+              <label>Image URL</label>
+              <input type="text" v-model="editingProduct.img" placeholder="/bundling/paketgeprek.png" />
+            </div>
+            <div class="form-group checkbox-group">
+              <input type="checkbox" id="edit-popular" v-model="editingProduct.popular" />
+              <label for="edit-popular">Show as Popular Item</label>
+            </div>
+            <button type="submit" class="btn btn-primary w-full">Update Product</button>
+          </form>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -854,6 +1376,319 @@ onMounted(() => {
 }
 .app-container.mounted {
   opacity: 1;
+}
+
+/* NEW ADDITIONS FOR LOGIN & DASHBOARD */
+.login-content {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 80vh;
+}
+.login-card {
+  background: white;
+  padding: 3rem;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  width: 100%;
+  max-width: 450px;
+  border: 1px solid var(--border);
+}
+.login-header-section {
+  text-align: center;
+  margin-bottom: 2.5rem;
+}
+.login-form-ui .form-group {
+  margin-bottom: 1.5rem;
+}
+.login-form-ui label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+  color: var(--text-dark);
+}
+.login-form-ui input {
+  width: 100%;
+  padding: 0.8rem 1rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  font-size: 1rem;
+  transition: border-color 0.2s;
+}
+.login-form-ui input:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.dashboard-content {
+  padding-top: 3rem;
+  padding-bottom: 5rem;
+}
+.dashboard-header-ui {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 3rem;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+}
+.dashboard-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+}
+.dashboard-tabs {
+  display: flex;
+  background: #f1f5f9;
+  padding: 0.4rem;
+  border-radius: var(--radius-md);
+  gap: 0.25rem;
+}
+.tab-btn {
+  padding: 0.6rem 1.2rem;
+  border-radius: 10px;
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: var(--text-light);
+  transition: all 0.2s;
+}
+.tab-btn.active {
+  background: white;
+  color: var(--primary);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Manage Products Styles */
+.product-cell {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+.mini-thumb {
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+}
+.badge-cat {
+  background: #f1f5f9;
+  color: #64748b;
+  padding: 0.2rem 0.6rem;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+.action-btns-list {
+  display: flex;
+  gap: 0.5rem;
+}
+.btn-icon-small {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: white;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.btn-icon-small.edit:hover { background: #eff6ff; border-color: #3b82f6; color: #3b82f6; }
+.btn-icon-small.delete:hover { background: #fef2f2; border-color: #ef4444; color: #ef4444; }
+
+.btn-outline-sm {
+  padding: 0.4rem 1rem;
+  font-size: 0.8rem;
+  border: 1px solid var(--border);
+  background: white;
+  border-radius: var(--radius-sm);
+}
+.btn-danger-sm {
+  padding: 0.4rem 1rem;
+  font-size: 0.8rem;
+  border: 1px solid #fee2e2;
+  background: #fef2f2;
+  color: #ef4444;
+  border-radius: var(--radius-sm);
+}
+
+/* Edit Modal */
+.edit-modal-card {
+  background: white;
+  width: 90%;
+  max-width: 600px;
+  padding: 2.5rem;
+  border-radius: var(--radius-lg);
+  box-shadow: 0 20px 50px rgba(0,0,0,0.1);
+  position: relative;
+}
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2rem;
+}
+.checkbox-group {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+.checkbox-group input {
+  width: 18px;
+  height: 18px;
+}
+
+.add-product-container {
+  max-width: 100%;
+}
+.admin-form-card {
+  background: white;
+  padding: 2.5rem;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+}
+.admin-form-card h3 {
+  margin-bottom: 2rem;
+}
+.admin-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+}
+.admin-form .form-group {
+  margin-bottom: 1.5rem;
+}
+.admin-form label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+.admin-form input, .admin-form select, .admin-form textarea {
+  width: 100%;
+  padding: 0.8rem 1rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  font-size: 1rem;
+}
+.admin-form input:focus, .admin-form select:focus, .admin-form textarea:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+@media (max-width: 768px) {
+  .admin-form-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.dashboard-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1.5rem;
+  margin-bottom: 3.5rem;
+}
+.stat-card {
+  background: white;
+  padding: 1.5rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+.stat-icon {
+  font-size: 2rem;
+  background: var(--secondary);
+  width: 50px;
+  height: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+}
+.stat-info {
+  display: flex;
+  flex-direction: column;
+}
+.stat-label {
+  font-size: 0.85rem;
+  color: var(--text-light);
+  font-weight: 600;
+}
+.stat-value {
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: var(--text-dark);
+}
+
+.recent-orders-section h3 {
+  margin-bottom: 2rem;
+  font-size: 1.5rem;
+}
+.orders-table-wrapper {
+  background: white;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+}
+.responsive-table {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.orders-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 800px;
+}
+.orders-table th {
+  text-align: left;
+  padding: 1rem 1.5rem;
+  background: #f8fafc;
+  font-weight: 700;
+  color: var(--text-light);
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--border);
+}
+.orders-table td {
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+}
+.badge-status {
+  padding: 0.25rem 0.75rem;
+  border-radius: var(--radius-full);
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.badge-status.pending { background: #fef3c7; color: #92400e; }
+.badge-status.success { background: #dcfce7; color: #166534; }
+
+/* Mobile Dashboard */
+.mobile-orders-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.order-mobile-card {
+  background: white;
+  padding: 1.5rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+}
+.order-mobile-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+.invoice-num { font-weight: 800; }
+.order-mobile-body p {
+  font-size: 0.9rem;
+  color: var(--text-light);
+  margin-bottom: 0.25rem;
 }
 .no-scroll {
   overflow: hidden;
@@ -930,6 +1765,7 @@ onMounted(() => {
   backdrop-filter: blur(15px);
   z-index: 50;
   border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+  padding-bottom: 1.25rem;
 }
 .header-grid {
   display: grid;
@@ -965,6 +1801,24 @@ onMounted(() => {
   padding: 0.5rem 1.5rem;
   border-radius: var(--radius-full);
 }
+.user-btn {
+  background: white;
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-full);
+  color: var(--text-dark);
+  border: 1px solid rgba(0,0,0,0.05);
+  transition: all 0.3s;
+}
+.user-btn:hover {
+  background: var(--primary);
+  color: white;
+  transform: scale(1.05);
+}
+
 .nav-link {
   font-weight: 600;
   color: var(--text-light);
@@ -1163,6 +2017,9 @@ onMounted(() => {
 
 
 /* ================= MENU & BUNDLES ================= */
+.menu-section {
+  padding-top: 6rem;
+}
 .section-header {
   text-align: center;
   margin-bottom: 3.5rem;
@@ -2345,14 +3202,35 @@ onMounted(() => {
   padding-bottom: 0.5rem;
 }
 .mt-3 { margin-top: 1.5rem; }
-.wa-btn {
-  background: #25D366; 
-  padding: 1rem;
-  box-shadow: 0 8px 20px rgba(37, 211, 102, 0.25);
-  border-color: #25D366;
-  color: white;
-}
 .wa-btn:hover { background: #1faf53; color: white; border-color:#1faf53; }
+
+.invoice-loading-state, .error-state {
+  background: white;
+  padding: 4rem;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  text-align: center;
+  margin-top: 2rem;
+}
+
+.spinner {
+  width: 40px;
+  height: 40px;
+  border: 4px solid #f3f3f3;
+  border-top: 4px solid var(--primary);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin: 0 auto 1.5rem;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.badge-status.success { background: #dcfce7; color: #166534; }
+.badge-status.pending { background: #fef3c7; color: #92400e; }
+.badge-status.failed { background: #fee2e2; color: #ef4444; }
 
 
 /* Mobile Bottom Navigation Hidden by Default */
@@ -2711,3 +3589,5 @@ onMounted(() => {
 }
 
 </style>
+
+
