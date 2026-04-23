@@ -184,7 +184,7 @@ const scrollToSection = (id) => {
 }
 
 // --- Coming Soon State ---
-const isComingSoon = ref(false)
+const isComingSoon = ref(true)
 const countdownDate = new Date('2026-05-01T00:00:00').getTime()
 const timeLeft = ref({
   days: 0,
