@@ -4,13 +4,18 @@ import { db } from './firebase'
 import { collection, addDoc, getDocs } from 'firebase/firestore'
 import emailjs from '@emailjs/browser'
 import { supabase } from './supabase'
+import { formatPrice, translateStatus } from './utils/formatters'
+
+import AdminLogin from './views/admin/AdminLogin.vue'
+import AdminDashboard from './views/admin/AdminDashboard.vue'
+
 
 // --- State ---
 const isAppLoading = ref(true)
 const preventUnmount = ref(true)
 const currentPage = ref('home')
 const isCartOpen = ref(false)
-const activeCategory = ref('All')
+const activeCategory = ref('Semua')
 const selectedFood = ref(null)
 const tempQuantity = ref(1)
 const activeMobileTab = ref('hero')
@@ -23,27 +28,16 @@ const loginForm = ref({
   password: ''
 })
 const isDashboardLoading = ref(false)
-const dashboardTransactions = ref([])
-const activeDashboardTab = ref('transactions')
 
 // New state for dynamic invoice
 const invoiceData = ref(null)
 const isInvoiceLoading = ref(false)
-const newProductForm = ref({
-  name: '',
-  description: '',
-  category: 'Main Course',
-  price: 0,
-  stock: 0,
-  variant: '',
-  image_url: ''
-})
+
+
 
 // Form states
-const editingProduct = ref(null)
-const isEditModalOpen = ref(false)
-
 const checkoutForm = ref({
+
   name: '',
   phone: '',
   email: '',
@@ -52,7 +46,7 @@ const checkoutForm = ref({
 const orderId = ref('')
 
 // --- Data ---
-const categories = ['All', 'Dish Utama', 'Sidedish', 'Drinks']
+const categories = ['Semua', 'Dish Utama', 'Sidedish', 'Minuman']
 
 const menu = ref([])
 const bundles = computed(() => {
@@ -63,18 +57,24 @@ const cart = ref([])
 
 // --- Computeds ---
 const filteredMenu = computed(() => {
-  if (activeCategory.value === 'All') {
-    // Show popular items, but exclude Bundling category
+  if (activeCategory.value === 'Semua') {
+    // Tampilkan item populer, tapi kecualikan kategori Bundling
     return menu.value.filter(item => item.popular && item.category !== 'Bundling')
   }
-  return menu.value.filter(item => item.category === activeCategory.value)
+  // Pencarian kategori yang lebih fleksibel
+  return menu.value.filter(item => {
+    if (activeCategory.value === 'Minuman') return item.category === 'Minuman' || item.category === 'Drinks'
+    if (activeCategory.value === 'Dish Utama') return item.category === 'Dish Utama' || item.category === 'Main Course'
+    if (activeCategory.value === 'Sidedish') return item.category === 'Sidedish' || item.category === 'Snacks'
+    return item.category === activeCategory.value
+  })
 })
 
 const categorizedMenu = computed(() => {
   return {
     'Dish Utama': menu.value.filter(i => i.category === 'Dish Utama' || i.category === 'Main Course'),
     'Sidedish': menu.value.filter(i => i.category === 'Sidedish' || i.category === 'Snacks'),
-    'Drinks': menu.value.filter(i => i.category === 'Drinks'),
+    'Minuman': menu.value.filter(i => i.category === 'Minuman' || i.category === 'Drinks'),
     'Bundling': menu.value.filter(i => i.category === 'Bundling')
   }
 })
@@ -83,11 +83,9 @@ const cartTotal = computed(() => {
   return cart.value.reduce((total, item) => total + (item.price * item.quantity), 0)
 })
 
-const formatPrice = (price) => {
-  return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(price)
-}
 
 // --- Methods ---
+
 const openFoodDetail = (item) => {
   selectedFood.value = item
   tempQuantity.value = 1
@@ -111,46 +109,8 @@ const addSelectedToCart = () => {
   selectedFood.value = null // close modal
 }
 
-// Product CRUD Methods
-const handleDeleteProduct = async (id) => {
-  if (!confirm('Are you sure you want to delete this product?')) return
-  try {
-    await supabase.delete('products', `id=eq.${id}`)
-    alert('Product deleted successfully!')
-    fetchProducts()
-  } catch (err) {
-    console.error('Delete error:', err)
-    alert('Failed to delete product')
-  }
-}
-
-const openEditModal = (product) => {
-  editingProduct.value = { ...product }
-  isEditModalOpen.value = true
-}
-
-const handleUpdateProduct = async () => {
-  try {
-    const id = editingProduct.value.id
-    const updateData = {
-      name: editingProduct.value.name,
-      desc: editingProduct.value.desc,
-      category: editingProduct.value.category,
-      price: editingProduct.value.price,
-      stock: editingProduct.value.stock,
-      popular: editingProduct.value.popular
-    }
-    await supabase.patch('products', `id=eq.${id}`, updateData)
-    alert('Product updated successfully!')
-    isEditModalOpen.value = false
-    fetchProducts()
-  } catch (err) {
-    console.error('Update error:', err)
-    alert('Failed to update product')
-  }
-}
-
 const addDirectToCart = (item) => {
+
   const existing = cart.value.find(i => i.id === item.id)
   if (existing) {
     existing.quantity += 1
@@ -212,9 +172,22 @@ const processPayment = async () => {
 
     const result = await response.json()
 
-    if (result.success && result.redirect_url) {
-      cart.value = []
-      window.location.href = result.redirect_url
+    if (result.success) {
+      if (checkoutForm.value.paymentMethod === 'qris') {
+        // Navigate to dedicated QRIS page
+        navigateTo('qris-payment')
+      } else {
+        // Direct WA for COD in same tab
+        const text = constructWhatsAppMessage()
+        const phone = '6281296379040'
+        const url = `https://wa.me/${phone}?text=${encodeURIComponent(text)}`
+        
+        // Reset flow before redirect
+        cart.value = []
+        navigateTo('home')
+        
+        window.location.href = url
+      }
     } else {
       throw new Error(result.message || 'Gagal memproses pembayaran')
     }
@@ -226,27 +199,56 @@ const processPayment = async () => {
   }
 }
 
-const processWhatsAppOrder = () => {
-  let text = `Halo IT's Food Time! Saya ingin memesan:\n\n`
-  text += `*Order ID:* ${orderId.value}\n`
-  text += `*Nama:* ${checkoutForm.value.name}\n`
-  text += `*No HP:* ${checkoutForm.value.phone}\n`
-  text += `*Email:* ${checkoutForm.value.email}\n`
-  text += `*Metode Pembayaran:* ${checkoutForm.value.paymentMethod.toUpperCase()}\n\n`
-  text += `*Detail Pesanan:*\n`
+const constructWhatsAppMessage = (isFromInvoice = false) => {
+  const data = isFromInvoice ? invoiceData.value : {
+    customer_name: checkoutForm.value.name,
+    items: cart.value,
+    total: cartTotal.value,
+    method: checkoutForm.value.paymentMethod
+  }
+
+  if (!data) return ''
+
+  let text = `Halo!, IT's Food Time :\n`
+  text += `Nama  : ${data.customer_name}\n`
+  text += `Nomor Telp : ${checkoutForm.value.phone || '-'}\n`
+  text += `alamat email : ${checkoutForm.value.email || '-'}\n`
   
-  cart.value.forEach(item => {
-    text += `- ${item.name} (${item.quantity}x) : ${formatPrice(item.price * item.quantity)}\n`
+  const items = isFromInvoice ? data.items : data.items
+  items.forEach(item => {
+    text += `Produk : ${item.name}\n`
+    text += `Jumlah Pesanan: ${item.quantity}\n`
   })
   
-  text += `\n*TOTAL PEMBAYARAN: ${formatPrice(cartTotal.value)}*`
+  text += `Total: ${formatPrice(data.total)}\n`
+  text += `Metode Pembayaran: ${data.method === 'qris' ? 'QRIS' : 'Bayar di Tempat (COD)'}\n\n`
   
-  const phone = '6281234567890'
+  text += `Kirimkan bukti setelah pembayaran ya!\n`
+  text += `Terima Kasih ❤️`
+  
+  return text
+}
+
+const sendWhatsAppOrder = () => {
+  const text = constructWhatsAppMessage()
+  const phone = '6281296379040'
   const url = `https://wa.me/${phone}?text=${encodeURIComponent(text)}`
-  window.open(url, '_blank')
   
-  // Clear cart after checkout
+  // Reset and go home before redirect
   cart.value = []
+  navigateTo('home')
+  
+  // Redirect in same tab
+  window.location.href = url
+}
+
+const processWhatsAppOrder = () => {
+  const text = constructWhatsAppMessage(true)
+  if (!text) return
+  
+  const phone = '6281296379040'
+  const url = `https://wa.me/${phone}?text=${encodeURIComponent(text)}`
+  window.location.href = url
 }
 
 const scrollToSection = (id) => {
@@ -432,39 +434,37 @@ const fetchProducts = async () => {
 }
 
 const handleLogin = async () => {
-  if (!loginForm.value.email || !loginForm.value.password) return
+  const email = loginForm.value.email.trim()
+  const password = loginForm.value.password.trim()
+  
+  if (!email || !password) {
+    alert('Mohon isi email dan password.')
+    return
+  }
   
   try {
-    const users = await supabase.get('users')
-    const user = users.find(u => u.email === loginForm.value.email && u.password === loginForm.value.password)
+    // Better way: Query for the specific user instead of fetching all
+    // This is more secure and efficient
+    const endpoint = `users?email=eq.${encodeURIComponent(email)}&password=eq.${encodeURIComponent(password)}`
+    const users = await supabase.get(endpoint)
     
-    if (user) {
+    if (users && users.length > 0) {
+      const user = users[0]
       isLoggedIn.value = true
       currentUser.value = user
       navigateTo('dashboard')
-      fetchDashboardTransactions()
     } else {
-      alert('Email atau password salah.')
+
+      alert('Email atau kata sandi salah.')
     }
   } catch (error) {
     console.error('Login error:', error)
-    alert('Terjadi kesalahan saat login.')
-  }
-}
-
-const fetchDashboardTransactions = async () => {
-  isDashboardLoading.value = true
-  try {
-    const transactions = await supabase.get('transactions')
-    dashboardTransactions.value = transactions
-  } catch (error) {
-    console.error('Error fetching dashboard data:', error)
-  } finally {
-    isDashboardLoading.value = false
+    alert('Terjadi kesalahan saat login: ' + (error.message || 'Cek koneksi atau database.'))
   }
 }
 
 const fetchInvoiceDetail = async (invNumber) => {
+
   if (!invNumber) return
   isInvoiceLoading.value = true
   try {
@@ -480,9 +480,9 @@ const fetchInvoiceDetail = async (invNumber) => {
         date: new Date(transaction.created_at).toLocaleDateString(),
         method: transaction.payment_method,
         status: transaction.payment_status,
-        customer_name: transaction.customers?.name || 'Customer', // Backend should ideally join this if needed
+        customer_name: transaction.customers?.name || 'Pelanggan', // Backend should ideally join this if needed
         items: transaction.transaction_items.map(ti => ({
-          name: ti.products?.name || 'Product',
+          name: ti.products?.name || 'Produk',
           quantity: ti.qty,
           price: ti.price,
           subtotal: ti.subtotal
@@ -503,46 +503,8 @@ const handleLogout = () => {
   navigateTo('home')
 }
 
-const handleAddProduct = async () => {
-  if (!newProductForm.value.name || newProductForm.value.price <= 0) {
-    alert('Nama produk dan harga harus diisi.')
-    return
-  }
-
-  isDashboardLoading.value = true
-  try {
-    await supabase.post('products', {
-      name: newProductForm.value.name,
-      description: newProductForm.value.description,
-      category: newProductForm.value.category,
-      price: newProductForm.value.price,
-      stock: newProductForm.value.stock,
-      variant: newProductForm.value.variant,
-      image_url: newProductForm.value.image_url
-    })
-
-    alert('Produk berhasil ditambahkan!')
-    // Reset form
-    newProductForm.value = {
-      name: '',
-      description: '',
-      category: 'Main Course',
-      price: 0,
-      stock: 0,
-      variant: ''
-    }
-    // Refresh products list
-    fetchProducts()
-    activeDashboardTab.value = 'transactions' // Return to transactions or stay? Let's stay for now or go to list if I had one.
-  } catch (error) {
-    console.error('Error adding product:', error)
-    alert('Gagal menambahkan produk.')
-  } finally {
-    isDashboardLoading.value = false
-  }
-}
-
 let countdownInterval = null
+
 
 // --- Lifecycle & Scroll Tracking ---
 let scrollObserver = null
@@ -602,6 +564,8 @@ onMounted(() => {
 
   if (path === '/login-admin') {
     currentPage.value = 'login'
+  } else if (path === '/dashboard') {
+    currentPage.value = 'dashboard'
   } else if (path === '/invoice') {
     currentPage.value = 'invoice'
     if (orderIdFromUrl) {
@@ -653,16 +617,16 @@ onMounted(() => {
           
           <div class="header-center hidden-mobile">
             <nav class="desktop-nav">
-              <a href="#" @click.prevent="navigateTo('home')" class="nav-link">Home</a>
+              <a href="#" @click.prevent="navigateTo('home')" class="nav-link">Beranda</a>
               <a href="#" @click.prevent="navigateTo('all-menu')" class="nav-link">Menu</a>
-              <a href="#bundles" @click.prevent="scrollToSection('bundles')" class="nav-link">Bundles</a>
+              <a href="#bundles" @click.prevent="scrollToSection('bundles')" class="nav-link">Paket Hemat</a>
             </nav>
           </div>
           
           <!-- Action Buttons -->
           <div class="header-right">
             <button class="cart-btn" @click="navigateTo('cart')" v-if="!isLoggedIn && !isComingSoon">
-              <span class="cart-label hidden-mobile">Cart</span>
+              <span class="cart-label hidden-mobile">Keranjang</span>
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/>
                 <path d="M16 10a4 4 0 0 1-8 0"/>
@@ -720,14 +684,14 @@ onMounted(() => {
           <!-- Top Marquee (Under Header) -->
           <div class="marquee-divider cs-top-marquee">
             <div class="marquee-track smooth">
-              <span v-for="n in 15" :key="n">COMING SOON </span>
+              <span v-for="n in 15" :key="n">SEGERA HADIR </span>
             </div>
           </div>
 
           <div class="container cs-content">
             <div class="cs-text-section">
               <!-- <div class="cs-badge">Coming Soon</div> -->
-              <h1 class="cs-title">Something Delicious <br/><span>is Brewing!</span></h1>
+              <h1 class="cs-title">Sesuatu yang Lezat <br/><span>Sedang Disiapkan!</span></h1>
               <p class="cs-subtitle">
                 Kami sedang menyiapkan pengalaman kuliner terbaik untuk masa depan Anda. 
                 Tunggu kehadiran kami sebentar lagi!
@@ -737,30 +701,30 @@ onMounted(() => {
               <div class="cs-countdown">
                 <div class="countdown-item">
                   <span class="number">{{ timeLeft.days || 0 }}</span>
-                  <span class="label">Days</span>
+                  <span class="label">Hari</span>
                 </div>
                 <div class="countdown-item">
                   <span class="number">{{ timeLeft.hours || 0 }}</span>
-                  <span class="label">Hours</span>
+                  <span class="label">Jam</span>
                 </div>
                 <div class="countdown-item">
                   <span class="number">{{ timeLeft.minutes || 0 }}</span>
-                  <span class="label">Minutes</span>
+                  <span class="label">Menit</span>
                 </div>
                 <div class="countdown-item">
                   <span class="number">{{ timeLeft.seconds || 0 }}</span>
-                  <span class="label">Seconds</span>
+                  <span class="label">Detik</span>
                 </div>
               </div>
 
               <!-- Registration Form -->
               <div class="cs-form-container">
                 <div v-if="!isSubmitted" class="cs-form-wrapper">
-                  <h3>Get Notified When We Launch</h3>
+                  <h3>Dapatkan Notifikasi Saat Kami Meluncur</h3>
                   <form @submit.prevent="submitRegistration" class="cs-form">
-                    <input type="text" v-model="regForm.name" placeholder="Your Name" required />
-                    <input type="email" v-model="regForm.email" placeholder="Your Email Address" required />
-                    <button type="submit" class="btn btn-primary cs-submit-btn">Notify Me</button>
+                    <input type="text" v-model="regForm.name" placeholder="Nama Anda" required />
+                    <input type="email" v-model="regForm.email" placeholder="Alamat Email Anda" required />
+                    <button type="submit" class="btn btn-primary cs-submit-btn">Beri Tahu Saya</button>
                   </form>
                 </div>
                 <div v-else class="cs-success-msg">
@@ -787,12 +751,10 @@ onMounted(() => {
           <section id="hero" class="hero-full">
             <div class="hero-overlay">
               <div class="container hero-content-centered">
-                <div class="badge">Student Special DiSC 20%</div>
-                <h1>Gather & Eat with Joy,<br/><span class="text-primary">Just like Home!</span></h1>
-                <p>Tired of campus meals? IT's Food Time brings you fresh, hot, and tasty food where everyone can gather comfortably.</p>
+                <h1>Kumpul & Makan dengan Ceria,<br/><span class="text-primary">Serasa di Rumah!</span></h1>
+                <p>Bosan dengan makanan kampus? IT's Food Time menghadirkan makanan segar, hangat, dan lezat untuk kumpul santai.</p>
                 <div class="hero-actions">
-                  <a href="#menu" class="btn btn-primary">Order Now</a>
-                  <a href="#bundles" class="btn btn-outline-light">View Combos</a>
+                  <a href="#menu" class="btn btn-primary">Pesan Sekarang</a>
                 </div>
               </div>
             </div>
@@ -809,8 +771,8 @@ onMounted(() => {
           <section id="menu" class="menu-section">
             <div class="container">
               <div class="section-header">
-                <h2>Craving for something?</h2>
-                <p>Select from our freshly made signatures</p>
+                <h2>Lagi Ngidam Sesuatu?</h2>
+                <p>Pilih dari menu andalan kami yang baru dibuat</p>
               </div>
               
               <div class="categories-container">
@@ -830,7 +792,7 @@ onMounted(() => {
               <div class="menu-grid">
                 <div class="menu-card" v-for="item in filteredMenu" :key="item.id" @click="openFoodDetail(item)">
                   <div class="card-img-wrapper">
-                    <span class="popular-badge" v-if="item.popular">Popular</span>
+                    <span class="popular-badge" v-if="item.popular">Populer</span>
                     <img :src="item.img" :alt="item.name" loading="lazy" />
                   </div>
                   <div class="card-content">
@@ -867,8 +829,8 @@ onMounted(() => {
           <section id="bundles" class="bundles-section">
             <div class="container">
               <div class="section-header">
-                <h2>Best Value Bundles</h2>
-                <p>Save more with our special combos, exclusively for students!</p>
+                <h2>Paket Hemat Terbaik</h2>
+                <p>Hemat lebih banyak dengan kombo spesial kami!</p>
               </div>
               <div class="bundles-grid">
                 <div class="bundle-card" v-for="bundle in bundles" :key="bundle.id" @click="openFoodDetail(bundle)">
@@ -884,7 +846,7 @@ onMounted(() => {
                       </div>
                     </div>
                     <button class="btn btn-primary bundle-btn" @click.stop="openFoodDetail(bundle)">
-                      View Detail
+                      Lihat Detail
                     </button>
                   </div>
                 </div>
@@ -899,9 +861,9 @@ onMounted(() => {
             <div class="page-header">
               <button class="back-btn" @click="navigateTo('home')">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
-                Back to Menu
+                Kembali ke Menu
               </button>
-              <h2>Your Cart 🛒</h2>
+              <h2>Keranjang Anda 🛒</h2>
             </div>
             
             <div v-if="cart.length > 0" class="cart-layout">
@@ -933,7 +895,7 @@ onMounted(() => {
                 </div>
               </div>
               <div class="cart-summary-card">
-                <h3>Order Summary</h3>
+                <h3>Ringkasan Pesanan</h3>
                 <div class="summary-row">
                   <span>Subtotal ({{ cart.length }} items)</span>
                   <span>{{ formatPrice(cartTotal) }}</span>
@@ -942,14 +904,14 @@ onMounted(() => {
                   <span>Total</span>
                   <span class="total-amount-large">{{ formatPrice(cartTotal) }}</span>
                 </div>
-                <button class="btn btn-primary w-full checkout-btn" @click="proceedToCheckout">Proceed to Checkout</button>
+                <button class="btn btn-primary w-full checkout-btn" @click="proceedToCheckout">Lanjut ke Pembayaran</button>
               </div>
             </div>
             <div v-else class="empty-state">
               <div class="empty-icon">🍟</div>
-              <h3>Your cart is empty</h3>
-              <p>Looks like you haven't added anything to your cart yet.</p>
-              <button class="btn btn-primary" @click="navigateTo('home')">Browse Menu</button>
+              <h3>Keranjang Anda kosong</h3>
+              <p>Sepertinya Anda belum menambahkan apa pun ke keranjang.</p>
+              <button class="btn btn-primary" @click="navigateTo('home')">Lihat Menu</button>
             </div>
           </div>
         </div>
@@ -960,49 +922,50 @@ onMounted(() => {
             <div class="page-header">
               <button class="back-btn" @click="navigateTo('cart')">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
-                Back to Cart
+                Kembali ke Keranjang
               </button>
-              <h2>Checkout 💳</h2>
+              <h2>Pembayaran 💳</h2>
             </div>
             <div class="checkout-layout">
               <div class="checkout-form">
                 <div class="form-section">
                   <div class="checkout-title-with-icon">
                     <span class="icon-circle">📍</span>
-                    <h3>Delivery Details</h3>
+                    <h3>Detail Pengiriman</h3>
                   </div>
                   <div class="form-group">
-                    <label>Full Name</label>
+                    <label>Nama Lengkap</label>
                     <input type="text" v-model="checkoutForm.name" placeholder="John Doe" required />
                   </div>
                   <div class="form-group">
-                    <label>Phone Number</label>
+                    <label>Nomor Telepon</label>
                     <input type="tel" v-model="checkoutForm.phone" placeholder="0812xxxxxx" required />
                   </div>
                   <div class="form-group">
-                    <label>Email Address</label>
+                    <label>Alamat Email</label>
                     <input type="email" v-model="checkoutForm.email" placeholder="john@example.com" required />
                   </div>
                 </div>
                 <div class="form-section mt-4">
                   <div class="checkout-title-with-icon">
                     <span class="icon-circle">💳</span>
-                    <h3>Payment Method</h3>
+                    <h3>Metode Pembayaran</h3>
                   </div>
                   <div class="payment-options">
                     <label class="payment-card" :class="{ selected: checkoutForm.paymentMethod === 'qris' }">
                       <input type="radio" value="qris" v-model="checkoutForm.paymentMethod">
-                      <div class="payment-info"><strong>QRIS</strong><span>Scan with any E-Wallet</span></div>
+                      <div class="payment-info"><strong>QRIS</strong><span>Scan dengan E-Wallet apa pun</span></div>
                     </label>
                     <label class="payment-card" :class="{ selected: checkoutForm.paymentMethod === 'cash' }">
                       <input type="radio" value="cash" v-model="checkoutForm.paymentMethod">
-                      <div class="payment-info"><strong>Cash on Delivery</strong><span>Pay when food arrives</span></div>
+                      <div class="payment-info"><strong>Bayar di Tempat (COD)</strong><span>Bayar saat makanan sampai</span></div>
                     </label>
                   </div>
+                  <!-- Note: QRIS image removed from here as per new flow to use a dedicated page -->
                 </div>
               </div>
               <div class="cart-summary-card">
-                <h3>Final Summary</h3>
+                <h3>Ringkasan Akhir</h3>
                 <div class="summary-list">
                   <div class="summary-row text-sm text-gray" v-for="item in cart" :key="item.id">
                     <span>{{ item.quantity }}x {{ item.name }}</span>
@@ -1011,10 +974,10 @@ onMounted(() => {
                 </div>
                 <hr class="summary-divider" />
                 <div class="summary-row total">
-                  <span>Grand Total</span>
+                  <span>Total Keseluruhan</span>
                   <span class="total-amount-large">{{ formatPrice(cartTotal) }}</span>
                 </div>
-                <button class="btn btn-primary w-full pay-btn" @click="processPayment">Complete Payment</button>
+                <button class="btn btn-primary w-full pay-btn" @click="processPayment">Selesaikan Pembayaran</button>
               </div>
             </div>
           </div>
@@ -1025,42 +988,85 @@ onMounted(() => {
           <div class="container invoice-content">
             <div v-if="isInvoiceLoading" class="invoice-loading-state">
               <div class="spinner"></div>
-              <p>Fetching your order details...</p>
+              <p>Mengambil detail pesanan Anda...</p>
             </div>
             <div v-else-if="invoiceData" class="invoice-card">
               <div class="success-icon">✓</div>
-              <h2>Order Confirmed!</h2>
-              <p class="invoice-subtitle">Thank you for ordering with IT's Food Time</p>
+              <h2>Pesanan Dikonfirmasi!</h2>
+              <p class="invoice-subtitle">Terima kasih telah memesan di IT's Food Time</p>
               <div class="invoice-details">
-                <div class="invoice-row"><span class="label">Order ID:</span><span class="value order-id">{{ invoiceData.id }}</span></div>
-                <div class="invoice-row"><span class="label">Date:</span><span class="value">{{ invoiceData.date }}</span></div>
-                <div class="invoice-row"><span class="label">Status:</span><span class="value capitalize" :class="invoiceData.status">{{ invoiceData.status }}</span></div>
-                <div class="invoice-row"><span class="label">Payment Method:</span><span class="value capitalize">{{ invoiceData.method }}</span></div>
+                <div class="invoice-row"><span class="label">ID Pesanan:</span><span class="value order-id">{{ invoiceData.id }}</span></div>
+                <div class="invoice-row"><span class="label">Tanggal:</span><span class="value">{{ invoiceData.date }}</span></div>
+                <div class="invoice-row"><span class="label">Status:</span><span class="value capitalize" :class="invoiceData.status">{{ translateStatus(invoiceData.status) }}</span></div>
+                <div class="invoice-row"><span class="label">Metode Pembayaran:</span><span class="value capitalize">{{ invoiceData.method }}</span></div>
               </div>
+
+              <!-- QRIS Display for Invoice -->
+              <div v-show="invoiceData.method === 'qris'" 
+                   style="margin-top: 20px; padding: 20px; background-color: #f0f9ff; border: 2px dashed #3b82f6; border-radius: 12px; text-align: center;">
+                <p style="margin-bottom: 10px; font-weight: bold; color: #1e40af;">Silakan scan QRIS untuk menyelesaikan pembayaran:</p>
+                <img src="/QRIS.jpeg" alt="QRIS" style="max-width: 250px; width: 100%; height: auto; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);" />
+              </div>
+
               <div class="invoice-items">
-                <h4>Items Ordered</h4>
+                <h4>Item yang Dipesan</h4>
                 <div class="summary-row text-sm" v-for="item in invoiceData.items" :key="item.name">
                   <span>{{ item.quantity }}x {{ item.name }}</span>
                   <span>{{ formatPrice(item.price * item.quantity) }}</span>
                 </div>
                 <hr class="summary-divider mt-3" />
                 <div class="summary-row total">
-                  <span>Total Paid</span>
+                  <span>Total Dibayar</span>
                   <span>{{ formatPrice(invoiceData.total) }}</span>
                 </div>
               </div>
               <div class="invoice-actions">
                 <button class="btn btn-primary wa-btn w-full" @click="processWhatsAppOrder">
-                  Send Invoice via WhatsApp
+                  Kirim Invoice via WhatsApp
                 </button>
-                <button class="btn btn-outline w-full mt-3" @click="navigateTo('home'); invoiceData=null; cart=[]">Back to Home</button>
+                <button class="btn btn-outline w-full mt-3" @click="navigateTo('home'); invoiceData=null; cart=[]">Kembali ke Beranda</button>
               </div>
             </div>
             <div v-else class="invoice-card error-state">
               <div class="error-icon">❌</div>
-              <h2>Invoice Not Found</h2>
-              <p>We couldn't retrieve the details for order <strong>{{ orderId }}</strong>.</p>
-              <button class="btn btn-primary mt-4" @click="navigateTo('home')">Back to Menu</button>
+              <h2>Invoice Tidak Ditemukan</h2>
+              <p>Kami tidak dapat menemukan detail untuk pesanan <strong>{{ orderId }}</strong>.</p>
+              <button class="btn btn-primary mt-4" @click="navigateTo('home')">Kembali ke Menu</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ==================== PAGE: QRIS PAYMENT (Full Page) ==================== -->
+        <div class="page-container" v-else-if="currentPage === 'qris-payment'">
+          <div class="container qris-payment-page animate-fade-up">
+            <div class="qris-payment-card">
+              <div class="qris-header">
+                <h2>Pembayaran QRIS 📱</h2>
+                <p>Silakan selesaikan pembayaran Anda dengan scan kode di bawah</p>
+              </div>
+              
+              <div class="qris-main-display">
+                <div class="qris-large-wrapper">
+                  <img src="/QRIS.jpeg" alt="QRIS Code" class="qris-full-img" />
+                </div>
+                <div class="payment-instructions">
+                  <ol>
+                    <li>Buka aplikasi e-wallet (GoPay, OVO, Dana, LinkAja) atau Mobile Banking Anda.</li>
+                    <li>Pilih fitur <strong>Scan / Bayar</strong>.</li>
+                    <li>Scan kode QR di atas atau unggah dari galeri.</li>
+                    <li>Masukkan nominal: <strong>{{ formatPrice(cartTotal) }}</strong></li>
+                    <li>Selesaikan pembayaran dan simpan buktinya.</li>
+                  </ol>
+                </div>
+              </div>
+
+              <div class="qris-actions">
+                <button class="btn btn-primary wa-confirm-btn" @click="sendWhatsAppOrder">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+                  Kirim Bukti via WhatsApp
+                </button>
+                <button class="btn btn-outline w-full" @click="navigateTo('home')">Kembali ke Beranda</button>
+              </div>
             </div>
           </div>
         </div>
@@ -1071,10 +1077,10 @@ onMounted(() => {
             <div class="page-header center-header">
               <button class="back-btn" @click="navigateTo('home')">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
-                Back to Home
+                Kembali ke Beranda
               </button>
-              <h2>Explore Our Full Menu</h2>
-              <p>Selection of Main Courses, Snacks, and Drinks</p>
+              <h2>Jelajahi Menu Lengkap Kami</h2>
+              <p>Pilihan Hidangan Utama, Camilan, dan Minuman</p>
             </div>
 
             <div v-for="(items, categoryName) in categorizedMenu" :key="categoryName" class="menu-category-section">
@@ -1085,7 +1091,7 @@ onMounted(() => {
               <div class="menu-grid">
                 <div class="menu-card" v-for="item in items" :key="item.id" @click="openFoodDetail(item)">
                   <div class="card-img-wrapper">
-                    <span class="popular-badge" v-if="item.popular">Popular</span>
+                    <span class="popular-badge" v-if="item.popular">Populer</span>
                     <img :src="item.img" :alt="item.name" loading="lazy" />
                   </div>
                   <div class="card-content">
@@ -1105,190 +1111,24 @@ onMounted(() => {
         </div>
 
         <!-- ==================== PAGE: LOGIN ==================== -->
-        <div class="page-container" v-else-if="currentPage === 'login'">
-          <div class="container login-content">
-            <div class="login-card animate-fade-up">
-              <div class="login-header-section">
-                <h2>Welcome Back 🍕</h2>
-                <p>Login to access your dashboard</p>
-              </div>
-              <form @submit.prevent="handleLogin" class="login-form-ui">
-                <div class="form-group">
-                  <label>Email Address</label>
-                  <input type="email" v-model="loginForm.email" placeholder="admin@mail.com" required />
-                </div>
-                <div class="form-group">
-                  <label>Password</label>
-                  <input type="password" v-model="loginForm.password" placeholder="••••••••" required />
-                </div>
-                <button type="submit" class="btn btn-primary w-full">Login</button>
-              </form>
-              <button class="btn btn-outline w-full mt-3" @click="navigateTo('home')">Back to Home</button>
-            </div>
-          </div>
-        </div>
+        <AdminLogin 
+          v-else-if="currentPage === 'login'" 
+          :loginForm="loginForm"
+          :isDashboardLoading="isDashboardLoading"
+          @login="handleLogin"
+          @navigate="navigateTo"
+        />
 
         <!-- ==================== PAGE: DASHBOARD ==================== -->
-        <div class="page-container" v-else-if="currentPage === 'dashboard'">
-          <div class="container dashboard-content">
-            <div class="dashboard-header-ui animate-fade-up">
-              <div class="user-greeting">
-                <h1>Hello, {{ currentUser?.name || 'Admin' }}! 👋</h1>
-                <p>Manage your food business orders here.</p>
-              </div>
-              <div class="dashboard-header-actions">
-                <div class="dashboard-tabs">
-                  <button class="tab-btn" :class="{ active: activeDashboardTab === 'transactions' }" @click="activeDashboardTab = 'transactions'">Transactions</button>
-                  <button class="tab-btn" :class="{ active: activeDashboardTab === 'manage-products' }" @click="activeDashboardTab = 'manage-products'">Product List</button>
-                  <button class="tab-btn" :class="{ active: activeDashboardTab === 'add-product' }" @click="activeDashboardTab = 'add-product'">Add Product</button>
-                </div>
-                <button class="btn btn-outline" @click="handleLogout">Logout</button>
-              </div>
-            </div>
+        <AdminDashboard
+          v-else-if="currentPage === 'dashboard'"
+          :currentUser="currentUser"
+          :menu="menu"
+          :categories="categories"
+          @logout="handleLogout"
+          @refresh-products="fetchProducts"
+        />
 
-            <!-- TAB: TRANSACTIONS -->
-            <div v-if="activeDashboardTab === 'transactions'">
-              <div class="dashboard-stats animate-fade-up delay-100">
-                <div class="stat-card">
-                  <span class="stat-icon">💰</span>
-                  <div class="stat-info">
-                    <span class="stat-label">Total Orders</span>
-                    <span class="stat-value">{{ dashboardTransactions.length }}</span>
-                  </div>
-                </div>
-                <div class="stat-card">
-                  <span class="stat-icon">✅</span>
-                  <div class="stat-info">
-                    <span class="stat-label">Pending</span>
-                    <span class="stat-value">{{ dashboardTransactions.filter(t => t.payment_status === 'pending').length }}</span>
-                  </div>
-                </div>
-              </div>
-
-              <div class="recent-orders-section animate-fade-up delay-200">
-                <h3>Recent Transactions</h3>
-                <div v-if="isDashboardLoading" class="dashboard-loading">
-                  <div class="spinner"></div>
-                  <p>Loading transactions...</p>
-                </div>
-                <div v-else-if="dashboardTransactions.length > 0" class="orders-table-wrapper responsive-table">
-                  <table class="orders-table">
-                    <thead>
-                      <tr>
-                        <th>Invoice</th>
-                        <th>Phone</th>
-                        <th>Email</th>
-                        <th>Status</th>
-                        <th>Method</th>
-                        <th>Date</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr v-for="t in dashboardTransactions" :key="t.transaction_id">
-                        <td class="font-bold">{{ t.invoice_number }}</td>
-                        <td>{{ t.phone }}</td>
-                        <td>{{ t.email }}</td>
-                        <td><span class="badge-status" :class="t.payment_status">{{ t.payment_status }}</span></td>
-                        <td class="capitalize">{{ t.payment_method }}</td>
-                        <td class="date-cell">{{ new Date(t.created_at).toLocaleDateString() }}</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-                <div v-else class="empty-dashboard">
-                  <p>No transactions found yet.</p>
-                </div>
-              </div>
-            </div>
-            
-            <!-- TAB: MANAGE PRODUCTS -->
-            <div v-else-if="activeDashboardTab === 'manage-products'" class="manage-products-container animate-fade-up">
-              <div class="recent-orders-section">
-                <div class="section-header-flex">
-                  <h3>Product List</h3>
-                  <p>{{ menu.length }} products available</p>
-                </div>
-                
-                <div class="orders-table-wrapper responsive-table">
-                  <table class="orders-table">
-                    <thead>
-                      <tr>
-                        <th>Product</th>
-                        <th>Category</th>
-                        <th>Price</th>
-                        <th>Stock</th>
-                        <th>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr v-for="item in menu" :key="item.id">
-                        <td>
-                          <div class="product-cell">
-                            <img :src="item.img" class="mini-thumb" />
-                            <span>{{ item.name }}</span>
-                          </div>
-                        </td>
-                        <td><span class="badge-cat">{{ item.category }}</span></td>
-                        <td>{{ formatPrice(item.price) }}</td>
-                        <td>{{ item.stock }}</td>
-                        <td>
-                          <div class="action-btns-list">
-                            <button class="btn-icon-small edit" @click="openEditModal(item)">✎</button>
-                            <button class="btn-icon-small delete" @click="handleDeleteProduct(item.id)">✕</button>
-                          </div>
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-
-            <!-- TAB: ADD PRODUCT -->
-            <div v-else-if="activeDashboardTab === 'add-product'" class="add-product-container animate-fade-up">
-              <div class="admin-form-card">
-                <h3>Add New Product</h3>
-                <form @submit.prevent="handleAddProduct" class="admin-form">
-                  <div class="admin-form-grid">
-                    <div class="form-group">
-                      <label>Product Name</label>
-                      <input type="text" v-model="newProductForm.name" placeholder="e.g. Sate Ayam" required />
-                    </div>
-                    <div class="form-group">
-                      <label>Category</label>
-                      <select v-model="newProductForm.category">
-                        <option v-for="cat in categories.filter(c => c !== 'All')" :key="cat" :value="cat">{{ cat }}</option>
-                      </select>
-                    </div>
-                    <div class="form-group">
-                      <label>Price (IDR)</label>
-                      <input type="number" v-model="newProductForm.price" placeholder="15000" required />
-                    </div>
-                    <div class="form-group">
-                      <label>Stock</label>
-                      <input type="number" v-model="newProductForm.stock" placeholder="10" required />
-                    </div>
-                  </div>
-                  <div class="form-group">
-                    <label>Description</label>
-                    <textarea v-model="newProductForm.description" placeholder="Short description of the product..." rows="3"></textarea>
-                  </div>
-                  <div class="form-group">
-                    <label>Variant / Notes</label>
-                    <input type="text" v-model="newProductForm.variant" placeholder="e.g. Extra Spicy, Large, etc." />
-                  </div>
-                  <div class="form-group">
-                    <label>Image URL (Optional)</label>
-                    <input type="text" v-model="newProductForm.image_url" placeholder="/bundling/paketgeprek.png" />
-                  </div>
-                  <button type="submit" class="btn btn-primary" :disabled="isDashboardLoading">
-                    {{ isDashboardLoading ? 'Adding...' : 'Save Product' }}
-                  </button>
-                </form>
-              </div>
-            </div>
-          </div>
-        </div>
 
       </main>
 
@@ -1311,56 +1151,14 @@ onMounted(() => {
               </div>
             </div>
             <button class="btn btn-primary w-full add-to-cart-big" @click="addSelectedToCart">
-              Add to Cart - {{ formatPrice(selectedFood.price * tempQuantity) }}
+              Tambah ke Keranjang - {{ formatPrice(selectedFood.price * tempQuantity) }}
             </button>
           </div>
         </div>
       </div>
 
-      <!-- EDIT PRODUCT MODAL -->
-      <div class="modal-overlay" v-if="isEditModalOpen" @click.self="isEditModalOpen = false">
-        <div class="edit-modal-card">
-          <div class="modal-header">
-            <h3>Edit Product</h3>
-            <button class="close-modal" @click="isEditModalOpen = false">×</button>
-          </div>
-          <form @submit.prevent="handleUpdateProduct" class="admin-form">
-            <div class="admin-form-grid">
-              <div class="form-group">
-                <label>Product Name</label>
-                <input type="text" v-model="editingProduct.name" required />
-              </div>
-              <div class="form-group">
-                <label>Category</label>
-                <select v-model="editingProduct.category">
-                  <option v-for="cat in categories.filter(c => c !== 'All')" :key="cat" :value="cat">{{ cat }}</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label>Price (IDR)</label>
-                <input type="number" v-model="editingProduct.price" required />
-              </div>
-              <div class="form-group">
-                <label>Stock</label>
-                <input type="number" v-model="editingProduct.stock" required />
-              </div>
-            </div>
-            <div class="form-group">
-              <label>Description</label>
-              <textarea v-model="editingProduct.desc" rows="3"></textarea>
-            </div>
-            <div class="form-group">
-              <label>Image URL</label>
-              <input type="text" v-model="editingProduct.img" placeholder="/bundling/paketgeprek.png" />
-            </div>
-            <div class="form-group checkbox-group">
-              <input type="checkbox" id="edit-popular" v-model="editingProduct.popular" />
-              <label for="edit-popular">Show as Popular Item</label>
-            </div>
-            <button type="submit" class="btn btn-primary w-full">Update Product</button>
-          </form>
-        </div>
-      </div>
+      <!-- EDIT PRODUCT MODAL MOVED TO AdminDashboard.vue -->
+
     </div>
   </div>
 </template>
@@ -1540,157 +1338,118 @@ onMounted(() => {
   height: 18px;
 }
 
-.add-product-container {
-  max-width: 100%;
-}
-.admin-form-card {
-  background: white;
-  padding: 2.5rem;
+
+/* QRIS UI */
+
+.qris-container {
+  margin-top: 1.5rem;
+  padding: 1.5rem;
+  background: #f8fafc;
   border-radius: var(--radius-lg);
+  border: 1px dashed var(--border);
+  text-align: center;
+}
+.qris-instruction {
+  font-size: 0.9rem;
+  color: var(--text-light);
+  margin-bottom: 1rem;
+  font-weight: 500;
+}
+.qris-image-wrapper {
+  background: white;
+  padding: 1rem;
+  border-radius: var(--radius-md);
+  display: inline-block;
+  box-shadow: var(--shadow-sm);
+}
+.qris-checkout-img {
+  max-width: 200px;
+  width: 100%;
+  height: auto;
+  border-radius: 4px;
+}
+
+/* QRIS Payment Page Styles */
+.qris-payment-page {
+  padding-top: 3rem;
+  padding-bottom: 5rem;
+  display: flex;
+  justify-content: center;
+}
+.qris-payment-card {
+  background: white;
+  padding: 3rem;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  max-width: 700px;
+  width: 100%;
+  text-align: center;
+  border: 1px solid var(--border);
+}
+.qris-header h2 {
+  font-size: 2rem;
+  margin-bottom: 0.5rem;
+}
+.qris-header p {
+  color: var(--text-light);
+  margin-bottom: 2.5rem;
+}
+.qris-main-display {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2.5rem;
+  align-items: center;
+  margin-bottom: 3rem;
+  text-align: left;
+}
+.qris-large-wrapper {
+  background: white;
+  padding: 1.5rem;
+  border-radius: var(--radius-md);
   border: 1px solid var(--border);
   box-shadow: var(--shadow-sm);
 }
-.admin-form-card h3 {
-  margin-bottom: 2rem;
-}
-.admin-form-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 1.5rem;
-}
-.admin-form .form-group {
-  margin-bottom: 1.5rem;
-}
-.admin-form label {
-  display: block;
-  margin-bottom: 0.5rem;
-  font-weight: 600;
-  font-size: 0.9rem;
-}
-.admin-form input, .admin-form select, .admin-form textarea {
+.qris-full-img {
   width: 100%;
-  padding: 0.8rem 1rem;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border);
-  font-size: 1rem;
+  height: auto;
+  display: block;
 }
-.admin-form input:focus, .admin-form select:focus, .admin-form textarea:focus {
-  outline: none;
-  border-color: var(--primary);
+.payment-instructions ol {
+  padding-left: 1.25rem;
+  color: var(--text-dark);
 }
-
-@media (max-width: 768px) {
-  .admin-form-grid {
-    grid-template-columns: 1fr;
-  }
+.payment-instructions li {
+  margin-bottom: 0.75rem;
+  font-size: 0.95rem;
+  line-height: 1.6;
 }
-.dashboard-stats {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 1.5rem;
-  margin-bottom: 3.5rem;
-}
-.stat-card {
-  background: white;
-  padding: 1.5rem;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border);
+.qris-actions {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 1rem;
 }
-.stat-icon {
-  font-size: 2rem;
-  background: var(--secondary);
-  width: 50px;
-  height: 50px;
+.wa-confirm-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 12px;
-}
-.stat-info {
-  display: flex;
-  flex-direction: column;
-}
-.stat-label {
-  font-size: 0.85rem;
-  color: var(--text-light);
-  font-weight: 600;
-}
-.stat-value {
-  font-size: 1.5rem;
-  font-weight: 800;
-  color: var(--text-dark);
+  gap: 0.75rem;
+  padding: 1.2rem;
+  font-size: 1.1rem;
+  font-weight: 700;
 }
 
-.recent-orders-section h3 {
-  margin-bottom: 2rem;
-  font-size: 1.5rem;
+@media (max-width: 600px) {
+  .qris-main-display {
+    grid-template-columns: 1fr;
+    text-align: center;
+  }
+  .qris-payment-card {
+    padding: 2rem 1.5rem;
+  }
 }
-.orders-table-wrapper {
-  background: white;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border);
-}
-.responsive-table {
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-}
-.orders-table {
-  width: 100%;
-  border-collapse: collapse;
-  min-width: 800px;
-}
-.orders-table th {
-  text-align: left;
-  padding: 1rem 1.5rem;
-  background: #f8fafc;
-  font-weight: 700;
-  color: var(--text-light);
-  font-size: 0.85rem;
-  text-transform: uppercase;
-  border-bottom: 1px solid var(--border);
-}
-.orders-table td {
-  padding: 1.25rem 1.5rem;
-  border-bottom: 1px solid var(--border);
-}
-.badge-status {
-  padding: 0.25rem 0.75rem;
-  border-radius: var(--radius-full);
-  font-size: 0.75rem;
-  font-weight: 700;
-  text-transform: uppercase;
-}
-.badge-status.pending { background: #fef3c7; color: #92400e; }
-.badge-status.success { background: #dcfce7; color: #166534; }
 
-/* Mobile Dashboard */
-.mobile-orders-list {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-.order-mobile-card {
-  background: white;
-  padding: 1.5rem;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border);
-}
-.order-mobile-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1rem;
-}
-.invoice-num { font-weight: 800; }
-.order-mobile-body p {
-  font-size: 0.9rem;
-  color: var(--text-light);
-  margin-bottom: 0.25rem;
-}
 .no-scroll {
+
   overflow: hidden;
   height: 100vh;
 }
@@ -1935,17 +1694,6 @@ onMounted(() => {
   justify-content: center;
   color: white;
   max-width: 800px;
-}
-.hero-content-centered .badge {
-  background: rgba(255,255,255,0.15);
-  backdrop-filter: blur(8px);
-  color: white;
-  border: 1px solid rgba(255,255,255,0.3);
-  font-weight: 700;
-  font-size: 0.9rem;
-  padding: 0.6rem 1.5rem;
-  border-radius: var(--radius-full);
-  margin-bottom: 2rem;
 }
 .hero-content-centered h1 {
   font-size: 4.5rem;
