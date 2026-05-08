@@ -19,7 +19,6 @@ const activeDashboardTab = ref('transactions')
 const newProductForm = ref({
   name: '',
   description: '',
-  category: 'Dish Utama',
   price: 0,
   stock: 0,
   variant: '',
@@ -29,25 +28,93 @@ const newProductForm = ref({
 const editingProduct = ref(null)
 const isEditModalOpen = ref(false)
 
+// Image Upload State
+const isUploading = ref(false)
+const selectedAddFile = ref(null)
+const addPreviewUrl = ref(null)
+const selectedEditFile = ref(null)
+const editPreviewUrl = ref(null)
+
+const handleFileChange = (e, type) => {
+  const file = e.target.files[0]
+  if (!file) return
+
+  // Validation
+  const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp']
+  if (!allowedTypes.includes(file.type)) {
+    alert('Format file tidak didukung. Gunakan JPG, PNG, atau WEBP.')
+    return
+  }
+
+  if (type === 'add') {
+    selectedAddFile.value = file
+    addPreviewUrl.value = URL.createObjectURL(file)
+  } else {
+    selectedEditFile.value = file
+    editPreviewUrl.value = URL.createObjectURL(file)
+  }
+}
+
+const uploadImage = async (file) => {
+  if (!file) return null
+  
+  const fileExt = file.name.split('.').pop()
+  const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`
+  const filePath = `products/${fileName}`
+
+  const { data, error } = await supabase.storage
+    .from('products')
+    .upload(filePath, file)
+
+  if (error) throw error
+
+  const { data: { publicUrl } } = supabase.storage
+    .from('products')
+    .getPublicUrl(filePath)
+
+  return publicUrl
+}
+
 const fetchDashboardTransactions = async () => {
   isDashboardLoading.value = true
   try {
-    const [transactions, customers] = await Promise.all([
-      supabase.get('transactions'),
-      supabase.get('customers')
-    ])
+    const { data, error } = await supabase
+      .from('orders')
+      .select('*, customers(*)')
+      .order('created_at', { ascending: false })
     
-    dashboardTransactions.value = transactions.map(t => {
-      const customer = customers.find(c => c.customer_id === t.customer_id)
-      return {
-        ...t,
-        customer_name: customer ? customer.name : 'Pelanggan'
-      }
-    }).sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+    if (error) throw error
+
+    dashboardTransactions.value = data.map(t => ({
+      ...t,
+      customer_name: t.customers?.full_name || 'Pelanggan',
+      phone: t.customers?.phone || '-',
+      email: t.customers?.email || '-'
+    }))
   } catch (error) {
     console.error('Error fetching dashboard data:', error)
   } finally {
     isDashboardLoading.value = false
+  }
+}
+
+const updateOrderStatus = async (orderId, newStatus) => {
+  try {
+    const { error } = await supabase
+      .from('orders')
+      .update({ order_status: newStatus })
+      .eq('id', orderId)
+    
+    if (error) throw error
+    
+    // Update local state
+    const order = dashboardTransactions.value.find(t => t.id === orderId)
+    if (order) order.order_status = newStatus
+    
+    alert('Status pesanan diperbarui!')
+  } catch (error) {
+    console.error('Error updating status:', error)
+    alert('Gagal memperbarui status.')
   }
 }
 
@@ -58,39 +125,56 @@ const handleAddProduct = async () => {
   }
 
   isDashboardLoading.value = true
+  isUploading.value = true
   try {
-    await supabase.post('products', {
-      name: newProductForm.value.name,
-      description: newProductForm.value.description,
-      category: newProductForm.value.category,
-      price: newProductForm.value.price,
-      stock: newProductForm.value.stock,
-      variant: newProductForm.value.variant
-    })
+    let finalImageUrl = newProductForm.value.image_url || '/logo/logo1.png'
+
+    // 1. Upload image if selected
+    if (selectedAddFile.value) {
+      const uploadedUrl = await uploadImage(selectedAddFile.value)
+      if (uploadedUrl) finalImageUrl = uploadedUrl
+    }
+
+    // 2. Save product
+    const { error } = await supabase.from('products').insert([
+      {
+        product_name: newProductForm.value.name,
+        description: newProductForm.value.description,
+        price: newProductForm.value.price,
+        stock_qty: newProductForm.value.stock,
+        image_url: finalImageUrl
+      }
+    ])
+
+    if (error) throw error
 
     alert('Produk berhasil ditambahkan!')
     newProductForm.value = {
       name: '',
       description: '',
-      category: 'Dish Utama',
       price: 0,
       stock: 0,
-      variant: ''
+      variant: '',
+      image_url: ''
     }
+    selectedAddFile.value = null
+    addPreviewUrl.value = null
     emit('refresh-products')
     activeDashboardTab.value = 'manage-products'
   } catch (error) {
     console.error('Error adding product:', error)
-    alert('Gagal menambahkan produk.')
+    alert('Gagal menambahkan produk: ' + error.message)
   } finally {
     isDashboardLoading.value = false
+    isUploading.value = false
   }
 }
 
 const handleDeleteProduct = async (id) => {
   if (!confirm('Apakah Anda yakin ingin menghapus produk ini?')) return
   try {
-    await supabase.delete('products', `product_id=eq.${id}`)
+    const { error } = await supabase.from('products').delete().eq('id', id)
+    if (error) throw error
     alert('Produk berhasil dihapus!')
     emit('refresh-products')
   } catch (err) {
@@ -105,22 +189,37 @@ const openEditModal = (product) => {
 }
 
 const handleUpdateProduct = async () => {
+  isUploading.value = true
   try {
+    let finalImageUrl = editingProduct.value.img
+    
+    // 1. Upload new image if selected
+    if (selectedEditFile.value) {
+      const uploadedUrl = await uploadImage(selectedEditFile.value)
+      if (uploadedUrl) finalImageUrl = uploadedUrl
+    }
+
     const id = editingProduct.value.id
     const updateData = {
-      name: editingProduct.value.name,
+      product_name: editingProduct.value.name,
       description: editingProduct.value.desc,
-      category: editingProduct.value.category,
       price: editingProduct.value.price,
-      stock: editingProduct.value.stock
+      stock_qty: editingProduct.value.stock,
+      image_url: finalImageUrl
     }
-    await supabase.patch('products', `product_id=eq.${id}`, updateData)
+    const { error } = await supabase.from('products').update(updateData).eq('id', id)
+    if (error) throw error
+    
     alert('Produk berhasil diperbarui!')
+    selectedEditFile.value = null
+    editPreviewUrl.value = null
     isEditModalOpen.value = false
     emit('refresh-products')
   } catch (err) {
     console.error('Update error:', err)
-    alert('Gagal memperbarui produk')
+    alert('Gagal memperbarui produk: ' + err.message)
+  } finally {
+    isUploading.value = false
   }
 }
 
@@ -161,7 +260,7 @@ onMounted(() => {
             <span class="stat-icon">✅</span>
             <div class="stat-info">
               <span class="stat-label">Menunggu</span>
-              <span class="stat-value">{{ dashboardTransactions.filter(t => t.payment_status === 'pending').length }}</span>
+              <span class="stat-value">{{ dashboardTransactions.filter(t => t.order_status === 'pending').length }}</span>
             </div>
           </div>
         </div>
@@ -186,12 +285,24 @@ onMounted(() => {
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="t in dashboardTransactions" :key="t.transaction_id">
+                <tr v-for="t in dashboardTransactions" :key="t.id">
                   <td class="font-bold">{{ t.invoice_number }}</td>
                   <td>{{ t.customer_name }}</td>
                   <td>{{ t.phone }}</td>
                   <td>{{ t.email }}</td>
-                  <td><span class="badge-status" :class="t.payment_status">{{ translateStatus(t.payment_status) }}</span></td>
+                  <td>
+                    <select 
+                      :value="t.order_status" 
+                      @change="updateOrderStatus(t.id, $event.target.value)"
+                      class="status-select"
+                      :class="t.order_status"
+                    >
+                      <option value="pending">Pending</option>
+                      <option value="paid">Paid</option>
+                      <option value="completed">Completed</option>
+                      <option value="cancelled">Cancelled</option>
+                    </select>
+                  </td>
                   <td class="capitalize">{{ t.payment_method }}</td>
                   <td class="date-cell">{{ new Date(t.created_at).toLocaleDateString() }}</td>
                 </tr>
@@ -217,7 +328,6 @@ onMounted(() => {
               <thead>
                 <tr>
                   <th>Produk</th>
-                  <th>Kategori</th>
                   <th>Harga</th>
                   <th>Stok</th>
                   <th>Aksi</th>
@@ -231,7 +341,6 @@ onMounted(() => {
                       <span>{{ item.name }}</span>
                     </div>
                   </td>
-                  <td><span class="badge-cat">{{ item.category }}</span></td>
                   <td>{{ formatPrice(item.price) }}</td>
                   <td>{{ item.stock }}</td>
                   <td>
@@ -258,12 +367,6 @@ onMounted(() => {
                 <input type="text" v-model="newProductForm.name" placeholder="misal: Sate Ayam" required />
               </div>
               <div class="form-group">
-                <label>Kategori</label>
-                <select v-model="newProductForm.category">
-                  <option v-for="cat in categories.filter(c => c !== 'Semua')" :key="cat" :value="cat">{{ cat }}</option>
-                </select>
-              </div>
-              <div class="form-group">
                 <label>Harga (IDR)</label>
                 <input type="number" v-model="newProductForm.price" placeholder="15000" required />
               </div>
@@ -280,9 +383,21 @@ onMounted(() => {
               <label>Varian / Catatan</label>
               <input type="text" v-model="newProductForm.variant" placeholder="misal: Ekstra Pedas, Besar, dll." />
             </div>
+            <div class="form-group">
+              <label>Upload Gambar Produk</label>
+              <input type="file" @change="handleFileChange($event, 'add')" accept="image/*" class="file-input" />
+              <div v-if="addPreviewUrl" class="image-preview-container">
+                <img :src="addPreviewUrl" class="image-preview" />
+                <p class="preview-label">Preview Gambar Baru</p>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Atau URL Gambar (Opsional)</label>
+              <input type="text" v-model="newProductForm.image_url" placeholder="https://..." />
+            </div>
 
-            <button type="submit" class="btn btn-primary" :disabled="isDashboardLoading">
-              {{ isDashboardLoading ? 'Menambahkan...' : 'Simpan Produk' }}
+            <button type="submit" class="btn btn-primary" :disabled="isDashboardLoading || isUploading">
+              {{ isUploading ? 'Mengunggah Gambar...' : (isDashboardLoading ? 'Menambahkan...' : 'Simpan Produk') }}
             </button>
           </form>
         </div>
@@ -303,12 +418,6 @@ onMounted(() => {
               <input type="text" v-model="editingProduct.name" required />
             </div>
             <div class="form-group">
-              <label>Kategori</label>
-              <select v-model="editingProduct.category">
-                <option v-for="cat in categories.filter(c => c !== 'Semua')" :key="cat" :value="cat">{{ cat }}</option>
-              </select>
-            </div>
-            <div class="form-group">
               <label>Harga (IDR)</label>
               <input type="number" v-model="editingProduct.price" required />
             </div>
@@ -321,8 +430,26 @@ onMounted(() => {
             <label>Deskripsi</label>
             <textarea v-model="editingProduct.desc" rows="3"></textarea>
           </div>
+          <div class="form-group">
+            <label>Ganti Gambar Produk</label>
+            <input type="file" @change="handleFileChange($event, 'edit')" accept="image/*" class="file-input" />
+            <div v-if="editPreviewUrl" class="image-preview-container">
+              <img :src="editPreviewUrl" class="image-preview" />
+              <p class="preview-label">Preview Gambar Baru</p>
+            </div>
+            <div v-else-if="editingProduct.img" class="image-preview-container">
+              <img :src="editingProduct.img" class="image-preview" />
+              <p class="preview-label">Gambar Saat Ini</p>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Atau Update URL Gambar</label>
+            <input type="text" v-model="editingProduct.img" />
+          </div>
 
-          <button type="submit" class="btn btn-primary w-full">Perbarui Produk</button>
+          <button type="submit" class="btn btn-primary w-full" :disabled="isUploading">
+            {{ isUploading ? 'Mengunggah...' : 'Perbarui Produk' }}
+          </button>
         </form>
       </div>
     </div>
@@ -526,10 +653,55 @@ onMounted(() => {
   font-size: 0.95rem;
   transition: all 0.2s;
 }
+.status-select {
+  padding: 0.4rem 0.8rem;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  border: none;
+  cursor: pointer;
+  appearance: none;
+  text-align: center;
+}
+.status-select.pending { background: #fffbeb; color: #d97706; }
+.status-select.paid { background: #f0fdf4; color: #16a34a; }
+.status-select.completed { background: #eff6ff; color: #2563eb; }
+.status-select.cancelled { background: #fef2f2; color: #dc2626; }
+
 .admin-form input:focus {
   border-color: var(--primary);
   outline: none;
   box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1);
+}
+
+.file-input {
+  padding: 0.5rem 0 !important;
+  border: none !important;
+}
+
+.image-preview-container {
+  margin-top: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 0.5rem;
+  background: #f8fafc;
+  text-align: center;
+}
+
+.image-preview {
+  max-width: 100%;
+  max-height: 200px;
+  border-radius: var(--radius-sm);
+  display: block;
+  margin: 0 auto 0.5rem;
+  object-fit: contain;
+}
+
+.preview-label {
+  font-size: 0.75rem;
+  color: var(--text-light);
+  font-weight: 600;
+  text-transform: uppercase;
 }
 
 /* Modal Edit */

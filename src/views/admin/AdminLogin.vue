@@ -23,8 +23,8 @@ const navigateTo = (page) => {
         </div>
         <form @submit.prevent="handleLogin" class="login-form-ui">
           <div class="form-group">
-            <label>Alamat Email</label>
-            <input type="email" v-model="loginForm.email" placeholder="admin@mail.com" required />
+            <label>Nama</label>
+            <input type="text" v-model="loginForm.email" placeholder="Admin Name" required />
           </div>
           <div class="form-group">
             <label>Kata Sandi</label>

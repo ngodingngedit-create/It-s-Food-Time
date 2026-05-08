@@ -5,6 +5,7 @@ import { collection, addDoc, getDocs } from 'firebase/firestore'
 import emailjs from '@emailjs/browser'
 import { supabase } from './supabase'
 import { formatPrice, translateStatus } from './utils/formatters'
+import * as bcrypt from 'bcryptjs'
 
 import AdminLogin from './views/admin/AdminLogin.vue'
 import AdminDashboard from './views/admin/AdminDashboard.vue'
@@ -15,7 +16,6 @@ const isAppLoading = ref(true)
 const preventUnmount = ref(true)
 const currentPage = ref('home')
 const isCartOpen = ref(false)
-const activeCategory = ref('Semua')
 const selectedFood = ref(null)
 const tempQuantity = ref(1)
 const activeMobileTab = ref('hero')
@@ -37,46 +37,30 @@ const isInvoiceLoading = ref(false)
 
 // Form states
 const checkoutForm = ref({
-
   name: '',
   phone: '',
   email: '',
+  address: '',
+  pickupDate: new Date().toISOString().split('T')[0],
+  pickupTime: '12:00',
+  notes: '',
   paymentMethod: 'qris'
 })
 const orderId = ref('')
 
 // --- Data ---
-const categories = ['Semua', 'Dish Utama', 'Sidedish', 'Minuman']
-
 const menu = ref([])
 const bundles = computed(() => {
-  return menu.value.filter(item => item.category === 'Bundling')
+  return menu.value.filter(item => item.name.toLowerCase().includes('paket') || item.name.toLowerCase().includes('hemat'))
 })
 
 const cart = ref([])
 
 // --- Computeds ---
 const filteredMenu = computed(() => {
-  if (activeCategory.value === 'Semua') {
-    // Tampilkan item populer, tapi kecualikan kategori Bundling
-    return menu.value.filter(item => item.popular && item.category !== 'Bundling')
-  }
-  // Pencarian kategori yang lebih fleksibel
-  return menu.value.filter(item => {
-    if (activeCategory.value === 'Minuman') return item.category === 'Minuman' || item.category === 'Drinks'
-    if (activeCategory.value === 'Dish Utama') return item.category === 'Dish Utama' || item.category === 'Main Course'
-    if (activeCategory.value === 'Sidedish') return item.category === 'Sidedish' || item.category === 'Snacks'
-    return item.category === activeCategory.value
-  })
-})
-
-const categorizedMenu = computed(() => {
-  return {
-    'Dish Utama': menu.value.filter(i => i.category === 'Dish Utama' || i.category === 'Main Course'),
-    'Sidedish': menu.value.filter(i => i.category === 'Sidedish' || i.category === 'Snacks'),
-    'Minuman': menu.value.filter(i => i.category === 'Minuman' || i.category === 'Drinks'),
-    'Bundling': menu.value.filter(i => i.category === 'Bundling')
-  }
+  // Show popular items or all if none marked popular
+  const popular = menu.value.filter(item => item.popular)
+  return popular.length > 0 ? popular : menu.value
 })
 
 const cartTotal = computed(() => {
@@ -152,44 +136,75 @@ const processPayment = async () => {
   
   isAppLoading.value = true // Show loader during process
   try {
-    const payload = {
-      customer: {
-        name: checkoutForm.value.name,
-        email: checkoutForm.value.email,
-        phone: checkoutForm.value.phone
-      },
-      items: cart.value.map(item => ({
-        product_id: item.id,
-        qty: item.quantity
-      }))
-    }
+    // 1. Save customer to table 'customers'
+    const { data: customerData, error: customerError } = await supabase
+      .from('customers')
+      .insert([
+        {
+          full_name: checkoutForm.value.name,
+          email: checkoutForm.value.email,
+          phone: checkoutForm.value.phone,
+          address: checkoutForm.value.address
+        }
+      ])
+      .select()
+      .single()
 
-    const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/checkout`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    })
+    if (customerError) throw customerError
 
-    const result = await response.json()
+    const customerId = customerData.id
 
-    if (result.success) {
-      if (checkoutForm.value.paymentMethod === 'qris') {
-        // Navigate to dedicated QRIS page
-        navigateTo('qris-payment')
-      } else {
-        // Direct WA for COD in same tab
-        const text = constructWhatsAppMessage()
-        const phone = '6281296379040'
-        const url = `https://wa.me/${phone}?text=${encodeURIComponent(text)}`
-        
-        // Reset flow before redirect
-        cart.value = []
-        navigateTo('home')
-        
-        window.location.href = url
-      }
+    // 2. Generate invoice number
+    const invoiceNumber = `INV-${Date.now()}`
+
+    // 3. Save order to table 'orders'
+    const { data: orderData, error: orderError } = await supabase
+      .from('orders')
+      .insert([
+        {
+          invoice_number: invoiceNumber,
+          customer_id: customerId,
+          total_amount: cartTotal.value,
+          payment_method: checkoutForm.value.paymentMethod,
+          order_status: 'pending',
+          pickup_date: checkoutForm.value.pickupDate,
+          pickup_time: checkoutForm.value.pickupTime,
+          notes: checkoutForm.value.notes
+        }
+      ])
+      .select()
+      .single()
+
+    if (orderError) throw orderError
+
+    const orderIdGenerated = orderData.id
+
+    // 4. Save items to table 'order_items'
+    const orderItems = cart.value.map(item => ({
+      order_id: orderIdGenerated,
+      product_id: item.id,
+      qty: item.quantity,
+      price: item.price,
+      subtotal: item.price * item.quantity
+    }))
+
+    const { error: itemsError } = await supabase
+      .from('order_items')
+      .insert(orderItems)
+
+    if (itemsError) throw itemsError
+
+    // Finalize flow
+    if (checkoutForm.value.paymentMethod === 'qris') {
+      navigateTo('qris-payment')
     } else {
-      throw new Error(result.message || 'Gagal memproses pembayaran')
+      const text = constructWhatsAppMessage()
+      const phone = '6281296379040'
+      const url = `https://wa.me/${phone}?text=${encodeURIComponent(text)}`
+      
+      cart.value = []
+      navigateTo('home')
+      window.location.href = url
     }
   } catch (error) {
     console.error('Checkout error:', error)
@@ -376,11 +391,13 @@ if (typeof window !== 'undefined') {
 // --- Supabase Methods ---
 const fetchProducts = async () => {
   try {
-    const data = await supabase.get('products')
+    const { data, error } = await supabase.from('products').select('*')
+    if (error) throw error
+
     // Map Supabase products to App structure
     menu.value = data.map(p => {
       let imageName = '/logo/logo1.png'
-      const lowerName = p.name.toLowerCase().replace(/\s/g, '')
+      const lowerName = (p.product_name || p.name || '').toLowerCase().replace(/\s/g, '')
       const cat = p.category ? p.category.toLowerCase() : ''
       
       if (p.image_url || p.img) {
@@ -416,12 +433,11 @@ const fetchProducts = async () => {
 
       return {
         id: p.id || p.product_id,
-        name: p.name,
+        name: p.product_name || p.name,
         desc: p.description || p.desc,
         price: p.price,
-        stock: p.stock || 0,
+        stock: p.stock_qty || p.stock || 0,
         variant: p.variant || '',
-        category: p.category,
         popular: p.popular !== undefined ? p.popular : true,
         img: imageName
       }
@@ -434,60 +450,97 @@ const fetchProducts = async () => {
 }
 
 const handleLogin = async () => {
-  const email = loginForm.value.email.trim()
+  const name = loginForm.value.email.trim() // Using email field as name
   const password = loginForm.value.password.trim()
   
-  if (!email || !password) {
-    alert('Mohon isi email dan password.')
+  if (!name || !password) {
+    alert('Mohon isi nama dan password.')
     return
   }
   
+  isDashboardLoading.value = true
   try {
-    // Better way: Query for the specific user instead of fetching all
-    // This is more secure and efficient
-    const endpoint = `users?email=eq.${encodeURIComponent(email)}&password=eq.${encodeURIComponent(password)}`
-    const users = await supabase.get(endpoint)
+    const { data: users, error } = await supabase
+      .from('users')
+      .select('*')
+      .eq('name', name)
+      .single()
     
-    if (users && users.length > 0) {
-      const user = users[0]
-      isLoggedIn.value = true
-      currentUser.value = user
-      navigateTo('dashboard')
-    } else {
+    if (error || !users) {
+      console.log("Login Error:", error)
+      alert('Nama atau kata sandi salah.')
+      return
+    }
 
-      alert('Email atau kata sandi salah.')
+    // Debugging logs
+    console.log("User found:", users)
+    console.log("DB Hash:", users.password_hash)
+
+    try {
+      // Compare password using bcrypt.compare()
+      const isValid = await bcrypt.compare(password, users.password_hash)
+      console.log("Is Valid:", isValid)
+
+      if (isValid) {
+        isLoggedIn.value = true
+        currentUser.value = users
+        
+        // Simple session storage
+        localStorage.setItem('food_time_session', JSON.stringify({
+          isLoggedIn: true,
+          user: users
+        }))
+        
+        currentPage.value = 'dashboard'
+        navigateTo('dashboard')
+      } else {
+        alert('Nama atau kata sandi salah.')
+      }
+    } catch (bcryptErr) {
+      console.error('Bcrypt compare error:', bcryptErr)
+      alert('Terjadi kesalahan pada enkripsi.')
     }
   } catch (error) {
     console.error('Login error:', error)
     alert('Terjadi kesalahan saat login: ' + (error.message || 'Cek koneksi atau database.'))
+  } finally {
+    isDashboardLoading.value = false
   }
 }
 
 const fetchInvoiceDetail = async (invNumber) => {
-
   if (!invNumber) return
   isInvoiceLoading.value = true
   try {
-    // We search by invoice_number column
-    const endpoint = `transactions?invoice_number=eq.${invNumber}&select=*,transaction_items(*,products(*))`
-    const data = await supabase.get(endpoint)
+    const { data, error } = await supabase
+      .from('orders')
+      .select(`
+        *,
+        customers (*),
+        order_items (
+          *,
+          products (*)
+        )
+      `)
+      .eq('invoice_number', invNumber)
+      .single()
     
-    if (data && data.length > 0) {
-      const transaction = data[0]
-      // Map it to a clean object
+    if (error) throw error
+
+    if (data) {
       invoiceData.value = {
-        id: transaction.invoice_number,
-        date: new Date(transaction.created_at).toLocaleDateString(),
-        method: transaction.payment_method,
-        status: transaction.payment_status,
-        customer_name: transaction.customers?.name || 'Pelanggan', // Backend should ideally join this if needed
-        items: transaction.transaction_items.map(ti => ({
-          name: ti.products?.name || 'Produk',
+        id: data.invoice_number,
+        date: new Date(data.created_at).toLocaleDateString(),
+        method: data.payment_method,
+        status: data.order_status,
+        customer_name: data.customers?.full_name || 'Pelanggan',
+        items: data.order_items.map(ti => ({
+          name: ti.products?.product_name || 'Produk',
           quantity: ti.qty,
           price: ti.price,
           subtotal: ti.subtotal
         })),
-        total: transaction.transaction_items.reduce((sum, i) => sum + i.subtotal, 0)
+        total: data.total_amount
       }
     }
   } catch (error) {
@@ -500,6 +553,7 @@ const fetchInvoiceDetail = async (invNumber) => {
 const handleLogout = () => {
   isLoggedIn.value = false
   currentUser.value = null
+  localStorage.removeItem('food_time_session')
   navigateTo('home')
 }
 
@@ -557,6 +611,20 @@ onMounted(() => {
   
   fetchProducts()
   
+  // Check session
+  const savedSession = localStorage.getItem('food_time_session')
+  if (savedSession) {
+    try {
+      const session = JSON.parse(savedSession)
+      if (session.isLoggedIn && session.user) {
+        isLoggedIn.value = true
+        currentUser.value = session.user
+      }
+    } catch (e) {
+      localStorage.removeItem('food_time_session')
+    }
+  }
+
   // Handle routes based on URL path
   const path = window.location.pathname
   const params = new URLSearchParams(window.location.search)
@@ -565,7 +633,11 @@ onMounted(() => {
   if (path === '/login-admin') {
     currentPage.value = 'login'
   } else if (path === '/dashboard') {
-    currentPage.value = 'dashboard'
+    if (!isLoggedIn.value) {
+      currentPage.value = 'login'
+    } else {
+      currentPage.value = 'dashboard'
+    }
   } else if (path === '/invoice') {
     currentPage.value = 'invoice'
     if (orderIdFromUrl) {
@@ -775,19 +847,6 @@ onMounted(() => {
                 <p>Pilih dari menu andalan kami yang baru dibuat</p>
               </div>
               
-              <div class="categories-container">
-                <div class="categories">
-                  <button 
-                    v-for="cat in categories" 
-                    :key="cat"
-                    class="cat-pill"
-                    :class="{ active: activeCategory === cat }"
-                    @click="activeCategory = cat"
-                  >
-                    {{ cat }}
-                  </button>
-                </div>
-              </div>
 
               <div class="menu-grid">
                 <div class="menu-card" v-for="item in filteredMenu" :key="item.id" @click="openFoodDetail(item)">
@@ -809,7 +868,7 @@ onMounted(() => {
               </div>
 
               <!-- See All Menu Button - Only visible when "All" (Popular) active -->
-              <div class="see-all-container" v-if="activeCategory === 'All'">
+              <div class="see-all-container">
                 <button class="btn btn-outline see-all-btn" @click="navigateTo('all-menu')">
                   Lihat Semua Menu
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
@@ -944,6 +1003,31 @@ onMounted(() => {
                   <div class="form-group">
                     <label>Alamat Email</label>
                     <input type="email" v-model="checkoutForm.email" placeholder="john@example.com" required />
+                  </div>
+                  <div class="form-group">
+                    <label>Alamat Pengiriman / Detail Lokasi</label>
+                    <textarea v-model="checkoutForm.address" placeholder="Jl. Raya No. 123..." rows="2" required></textarea>
+                  </div>
+                </div>
+
+                <div class="form-section mt-4">
+                  <div class="checkout-title-with-icon">
+                    <span class="icon-circle">⏰</span>
+                    <h3>Waktu Penjemputan</h3>
+                  </div>
+                  <div class="form-grid-2">
+                    <div class="form-group">
+                      <label>Tanggal</label>
+                      <input type="date" v-model="checkoutForm.pickupDate" required />
+                    </div>
+                    <div class="form-group">
+                      <label>Jam</label>
+                      <input type="time" v-model="checkoutForm.pickupTime" required />
+                    </div>
+                  </div>
+                  <div class="form-group">
+                    <label>Catatan Pesanan (Opsional)</label>
+                    <input type="text" v-model="checkoutForm.notes" placeholder="Contoh: Sambal dipisah, dll." />
                   </div>
                 </div>
                 <div class="form-section mt-4">
@@ -1083,26 +1167,20 @@ onMounted(() => {
               <p>Pilihan Hidangan Utama, Camilan, dan Minuman</p>
             </div>
 
-            <div v-for="(items, categoryName) in categorizedMenu" :key="categoryName" class="menu-category-section">
-              <div class="category-divider">
-                <span>{{ categoryName }}</span>
-              </div>
-              
-              <div class="menu-grid">
-                <div class="menu-card" v-for="item in items" :key="item.id" @click="openFoodDetail(item)">
-                  <div class="card-img-wrapper">
-                    <span class="popular-badge" v-if="item.popular">Populer</span>
-                    <img :src="item.img" :alt="item.name" loading="lazy" />
-                  </div>
-                  <div class="card-content">
-                    <div class="card-title">{{ item.name }}</div>
-                    <div class="card-desc">{{ item.desc }}</div>
-                    <div class="card-footer">
-                      <span class="price">{{ formatPrice(item.price) }}</span>
-                      <button class="add-btn" @click.stop="addDirectToCart(item)">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                      </button>
-                    </div>
+            <div class="menu-grid">
+              <div class="menu-card" v-for="item in menu" :key="item.id" @click="openFoodDetail(item)">
+                <div class="card-img-wrapper">
+                  <span class="popular-badge" v-if="item.popular">Populer</span>
+                  <img :src="item.img" :alt="item.name" loading="lazy" />
+                </div>
+                <div class="card-content">
+                  <div class="card-title">{{ item.name }}</div>
+                  <div class="card-desc">{{ item.desc }}</div>
+                  <div class="card-footer">
+                    <span class="price">{{ formatPrice(item.price) }}</span>
+                    <button class="add-btn" @click.stop="addDirectToCart(item)">
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                    </button>
                   </div>
                 </div>
               </div>
@@ -1124,7 +1202,6 @@ onMounted(() => {
           v-else-if="currentPage === 'dashboard'"
           :currentUser="currentUser"
           :menu="menu"
-          :categories="categories"
           @logout="handleLogout"
           @refresh-products="fetchProducts"
         />
