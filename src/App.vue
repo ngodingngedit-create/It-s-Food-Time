@@ -3,26 +3,46 @@ import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { db } from './firebase'
 import { collection, addDoc, getDocs } from 'firebase/firestore'
 import emailjs from '@emailjs/browser'
+import { supabase } from './supabase'
+import { formatPrice, translateStatus } from './utils/formatters'
+import * as bcrypt from 'bcryptjs'
+
+import AdminLogin from './views/admin/AdminLogin.vue'
+import AdminDashboard from './views/admin/AdminDashboard.vue'
+
 
 // --- State ---
 const isAppLoading = ref(true)
 const preventUnmount = ref(true)
 const currentPage = ref('home')
 const isCartOpen = ref(false)
-const activeCategory = ref('Semua')
+const activeCategory = ref('All')
 const selectedFood = ref(null)
 const tempQuantity = ref(1)
 const activeMobileTab = ref('hero')
+
+// Auth and Dashboard
+const isLoggedIn = ref(false)
+const currentUser = ref(null)
+const loginForm = ref({
+  email: '',
+  password: ''
+})
+const isDashboardLoading = ref(false)
+
+// New state for dynamic invoice
+const invoiceData = ref(null)
+const isInvoiceLoading = ref(false)
+
+
 
 // Form states
 const checkoutForm = ref({
   name: '',
   phone: '',
+  email: '',
   address: '',
-  paymentMethod: 'qris',
-  panitiaId: '',
-  prodi: '',
-  kelas: ''
+  paymentMethod: 'qris'
 })
 const orderId = ref('')
 
@@ -30,146 +50,39 @@ const orderId = ref('')
 const cardQuantities = ref({})
 
 // --- Data ---
-const categories = ['Semua', 'Makanan Utama', 'Minuman']
+const categories = ['All', 'Main Course', 'Snacks', 'Drinks']
 
 const menu = ref([
   //main course
-  { 
-    id: 1, 
-    name: 'Rice Bowl Ayam Popcorn', 
-    desc: 'Nasi hangat dengan ayam popcorn yang gurih dan saus pilihan.', 
-    longDesc: 'Nikmati perpaduan nasi putih hangat dengan ayam popcorn renyah. Bahan utama: Beras 100gr, Daging ayam 150gr, Telur, Timun, Minyak goreng, Tepung terigu, Sambal bawang, dan Bumbu penyedap.',
-    price: 20000, 
-    category: 'Makanan Utama', 
-    popular: true, 
-    rating: 4.8,
-    reviews: 124,
-    img: '/maincourse/ricebowl.png' 
-  },
-  { 
-    id: 3, 
-    name: 'Dimsum Goreng (3pcs)', 
-    desc: 'Dimsum goreng dengan isian daging ayam dan udang yang juicy gurih dan lezat.', 
-    longDesc: 'Dimsum goreng krispi dengan isian daging ayam pilihan dan udang segar. Bahan: Fillet ayam 75gr, Kulit lumpia, Saus Bangkok, Keju oles, Tepung terigu, Minyak goreng, dan Bumbu penyedap.',
-    price: 15000, 
-    category: 'Makanan Utama', 
-    popular: false, 
-    rating: 4.7,
-    reviews: 85,
-    img: '/maincourse/dimsum.png' 
-  },
-  // { 
-  //   id: 2, 
-  //   name: 'Kimbab', 
-  //   desc: 'Gulungan nasi dengan isian segar seperti timun, wortel, crabstick, dan selada hijau.', 
-  //   longDesc: 'Kimbab autentik Korea dengan isian sayuran segar (wortel, timun, selada), crabstick berkualitas, dan telur dadar lembut yang digulung dengan nasi beraroma minyak wijen dan dibalut rumput laut (nori) premium. Camilan sehat yang praktis dan mengenyangkan.',
-  //   price: 12000, 
-  //   category: 'Makanan Utama', 
-  //   popular: true, 
-  //   rating: 4.6,
-  //   reviews: 92,
-  //   img: '/maincourse/kimbab.png' 
-  // },
+  { id: 1, name: 'Rice Bowl Chicken Popcorn', desc: 'Nasi hangat dengan ayam popcorn yang gurih dan saus pilihan.', price: 15000, category: 'Main Course', popular: true, img: '/maincourse/ricebowl.png' },
+  { id: 3, name: 'Fried Dimsum', desc: 'Dimsum goreng dengan isian daging ayam dan udang yang juicy gurih dan lezat dan juga keju didalam yang lumer.', price: 7000, category: 'Main Course', popular: false, img: '/maincourse/dimsum.png' },
+  { id: 2, name: 'Kimbab', desc: 'Gulungan nasi dengan isian segar seperti timun, wortel, crabstick, dan selada hijau, menghadirkan perpaduan rasa ringan, gurih, dan menyegarkan di setiap gigitan.', price: 12000, category: 'Main Course', popular: true, img: '/maincourse/kimbab.png' },
   
   //drinks
-  { 
-    id: 4, 
-    name: 'Brazilian Lemonade', 
-    desc: 'Minuman segar dengan rasa lemon yang khas dan menyegarkan.', 
-    longDesc: 'Minuman viral yang memadukan kesegaran jeruk nipis dengan kelembutan kental manis. Bahan: Lemon 1pcs, Susu kental manis 40gr, Es batu, dan Air mineral.',
-    price: 10000, 
-    category: 'Minuman', 
-    popular: true, 
-    rating: 4.9,
-    reviews: 210,
-    img: '/drinks/brazilianlemonade.png' 
-  },
+  { id: 4, name: 'Brazilian Lemonade', desc: 'Minuman segar dengan rasa lemon yang khas dan menyegarkan.', price: 8000, category: 'Drinks', popular: true, img: '/drinks/brazilianlemonade.png' },
 
   //snacks
-  // { 
-  //   id: 5, 
-  //   name: 'Makaroni Kering', 
-  //   desc: 'Cemilan gurih dan renyah dengan bumbu pilihan yang bikin nagih.', 
-  //   longDesc: 'Makaroni goreng dengan tekstur yang sangat renyah, dibumbui dengan rempah-rempah pilihan dan daun jeruk yang memberikan aroma khas. Tersedia dalam berbagai tingkat kepedasan yang bisa disesuaikan dengan selera Anda.',
-  //   price: 8000,  
-  //   popular: true, 
-  //   rating: 4.5,
-  //   reviews: 156,
-  //   img: '/snacks/makaroni.png' 
-  // },
-  // { 
-  //   id: 6, 
-  //   name: 'Jagung (marning)', 
-  //   desc: 'Jagung kering yang digoreng renyah dengan rasa gurih khas.', 
-  //   longDesc: 'Camilan tradisional yang terbuat dari biji jagung pilihan yang diproses hingga kering dan digoreng hingga mekar sempurna. Memiliki rasa gurih alami yang simpel namun sangat adiktif, cocok untuk menemani waktu santai Anda.',
-  //   price: 8000, 
-  //   category: 'Cemilan', 
-  //   popular: false, 
-  //   rating: 4.4,
-  //   reviews: 78,
-  //   img: '/snacks/jagung.png' 
-  // },
-  // { 
-  //   id: 7, 
-  //   name: 'Basreng', 
-  //   desc: 'Bakso goreng dengan tekstur kriuk dan bumbu pedas gurih yang kuat.', 
-  //   longDesc: 'Bakso ikan pilihan yang diiris tipis dan digoreng hingga garing (kriuk), kemudian ditaburi bumbu pedas daun jeruk yang melimpah. Perpaduan rasa ikan yang gurih dan pedas yang nendang menjadikannya favorit semua kalangan.',
-  //   price: 8000, 
-  //   category: 'Cemilan', 
-  //   popular: false, 
-  //   rating: 4.7,
-  //   reviews: 134,
-  //   img: '/snacks/basreng.png' 
-  // },
-  // { 
-  //   id: 8, 
-  //   name: 'Keripik Pisang', 
-  //   desc: 'Irisan pisang tipis yang digoreng renyah dengan rasa manis alami.', 
-  //   longDesc: 'Terbuat dari pisang kepok pilihan yang diiris tipis secara presisi, kemudian digoreng dengan teknik khusus untuk mendapatkan kerenyahan maksimal. Memiliki rasa manis alami pisang dengan sentuhan gurih yang pas.',
-    // price: 8000, 
-  //   category: 'Cemilan', 
-  //   popular: false, 
-  //   rating: 4.5,
-  //   reviews: 89,
-  //   img: '/snacks/keripikpisanng.png' 
-  // },
-  // { 
-  //   id: 9, 
-  //   name: 'Kuping Gajah', 
-  //   desc: 'Cemilan tradisional renyah dengan perpaduan rasa manis dan gurih.', 
-  //   longDesc: 'Kue tradisional dengan bentuk unik menyerupai telinga gajah, memiliki tekstur renyah dan tipis. Dibuat dari adonan tepung pilihan dengan pola spiral cokelat-putih yang ikonik, memberikan rasa manis yang ringan dan gurih.',
-  //   price: 8000, 
-  //   category: 'Cemilan', 
-  //   popular: false, 
-  //   rating: 4.3,
-  //   reviews: 67,
-  //   img: '/snacks/kupinggajah.png'
-  // },
-  { 
-    id: 10, 
-    name: 'Jasuke', 
-    desc: 'Jagung susu keju dengan rasa manis dan gurih yang khas.', 
-    longDesc: 'Jagung manis pipil yang dikukus hangat dengan mentega, kental manis, dan parutan keju. Bahan: Jagung 125gr, Keju 20gr, Susu kental manis 20gr, dan Mentega 20gr.',
-    price: 8000, 
-    category: 'Cemilan', 
-    popular: false, 
-    rating: 4.8,
-    reviews: 145,
-    img: '/snacks/jasuke.png'
-  }
+  { id: 5, name: 'Makaroni Kering', desc: 'Cemilan gurih dan renyah dengan bumbu pilihan yang bikin nagih di setiap gigitan.', price: 8000, category: 'Snacks', popular: true, img: '/snacks/makaroni.png' },
+  { id: 6, name: 'Jagung (marning)', desc: 'Jagung kering yang digoreng renyah dengan rasa gurih khas yang simpel tapi addictive.', price: 8000, category: 'Snacks', popular: false, img: '/snacks/jagung.png' },
+  { id: 7, name: 'Basreng', desc: 'Bakso goreng dengan tekstur kriuk dan bumbu pedas gurih yang kuat.', price: 8000, category: 'Snacks', popular: false, img: '/snacks/basreng.png' },
+  { id: 8, name: 'Keripik Pisang', desc: 'Irisan pisang tipis yang digoreng renyah dengan rasa manis alami dan ringan.', price: 8000, category: 'Snacks', popular: false, img: '/snacks/keripikpisanng.png' },
+  {  id: 9, name: 'Kuping Gajah', desc: 'Cemilan tradisional renyah dengan perpaduan rasa manis dan gurih yang khas.', price: 8000, category: 'Snacks', popular: false, img: '/snacks/kupinggajah.png'},
+  { id: 10, name: 'Jasuke', desc: 'Jagung susu keju dengan rasa manis dan gurih yang khas.', price: 7000, category: 'Snacks', popular: false, img: '/snacks/jasuke.png'}
 ])
 
 const bundles = ref([
-  { id: 101, name: 'Paket Dark Mode', desc: 'Rice Bowl + Jasuke + Brazilian Lemonade', longDesc: 'Pilihan pas buat yang lapar! Nasi bowl ayam popcorn yang mengenyangkan, ditambah Jasuke manis, dan segarnya Brazilian Lemonade.', price: 33000, oldPrice: 40000, rating: 4.9, reviews: 340, img: '/bundling/paketngampus.png' },
-  { id: 102, name: 'Paket Light Mode', desc: 'Dimsum Goreng + Jasuke + Brazilian Lemonade', longDesc: 'Perpaduan cemilan hemat: Dimsum Goreng krispi, Jasuke manis, dan Brazilian Lemonade yang segar. Cocok untuk menemani waktu santai!', price: 28000, oldPrice: 35000, rating: 4.8, reviews: 215, img: '/bundling/paketjajn.png' },
-  { id: 103, name: 'Paket Fullstack', desc: 'Rice Bowl + Dimsum + Jasuke + Lemonade', longDesc: 'Paket komplit untuk kepuasan maksimal! Semua menu andalan dalam satu paket istimewa untuk pengalaman kuliner terbaik.', price: 46500, oldPrice: 55000, rating: 5.0, reviews: 450, img: '/bundling/paketnongkrongbareng.png'}
+  { id: 101, name: 'Paket Ngampus', desc: 'Rice bowl + Brazilian Lemonade', price: 20000, oldPrice: 23000, img: '/bundling/paketngampus.png' },
+  { id: 102, name: 'Paket Jajan', desc: 'Dimsum Goreng Keju + Brazilian Lemonade', price: 21000, oldPrice: 23000, img: '/bundling/paketjajn.png' },
+  { id: 103, name: 'Paket Nyemil', desc: 'Jagung Susu Keju + Brazilian Lemonade', price: 13000, oldPrice: 15000, img: '/bundling/paketnyemil.png'},
+  { id: 104, name: 'Paket Kenyang', desc: 'Rice Bowl + Dimsum Goreng Keju + Jagung Susu Keju', price: 33000, oldPrice: 37000, img: '/bundling/paketnongkrongbareng.png'},
+  { id: 105, name: 'Paket Traktir', desc: 'Rice Bowl + Dimsum Goreng Keju + Jagung Susu Keju + Brazilian Lemonade', price: 40000, oldPrice: 45000, img: '/bundling/pakettraktir.jpg'}
 ])
 
 const cart = ref([])
 
 // --- Computeds ---
 const filteredMenu = computed(() => {
-  if (activeCategory.value === 'Semua') {
+  if (activeCategory.value === 'All') {
     return menu.value.filter(item => item.popular)
   }
   return menu.value.filter(item => item.category === activeCategory.value)
@@ -177,8 +90,9 @@ const filteredMenu = computed(() => {
 
 const categorizedMenu = computed(() => {
   return {
-    'Makanan Utama': menu.value.filter(i => i.category === 'Makanan Utama'),
-    'Minuman': menu.value.filter(i => i.category === 'Minuman')
+    'Main Course': menu.value.filter(i => i.category === 'Main Course'),
+    'Snacks': menu.value.filter(i => i.category === 'Snacks'),
+    'Drinks': menu.value.filter(i => i.category === 'Drinks')
   }
 })
 
@@ -186,11 +100,9 @@ const cartTotal = computed(() => {
   return cart.value.reduce((total, item) => total + (item.price * item.quantity), 0)
 })
 
-const formatPrice = (price) => {
-  return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(price)
-}
 
 // --- Methods ---
+
 const openFoodDetail = (item) => {
   selectedFood.value = item
   tempQuantity.value = 1
@@ -215,6 +127,7 @@ const addSelectedToCart = () => {
 }
 
 const addDirectToCart = (item) => {
+
   const existing = cart.value.find(i => i.id === item.id)
   if (existing) {
     existing.quantity += 1
@@ -237,6 +150,10 @@ const navigateTo = (page) => {
   currentPage.value = page
   isCartOpen.value = false
   window.scrollTo({ top: 0, behavior: 'smooth' })
+  
+  // Update URL manually for "pseudo-routing"
+  const path = page === 'home' || page === 'hero' ? '/' : `/${page}`
+  window.history.pushState(null, '', path)
 }
 
 const proceedToCheckout = () => {
@@ -245,16 +162,9 @@ const proceedToCheckout = () => {
 }
 
 const processPayment = () => {
-  if (checkoutForm.value.paymentMethod === 'panitia') {
-    if (!checkoutForm.value.name || !checkoutForm.value.panitiaId || !checkoutForm.value.prodi || !checkoutForm.value.kelas) {
-      alert("Mohon lengkapi data Panitia Anda.")
-      return
-    }
-  } else {
-    if (!checkoutForm.value.name || !checkoutForm.value.address) {
-      alert("Mohon lengkapi data pengiriman Anda.")
-      return
-    }
+  if (!checkoutForm.value.name || !checkoutForm.value.address) {
+    alert("Mohon lengkapi data pengiriman Anda.")
+    return
   }
   
   // Generate random order ID
@@ -263,35 +173,49 @@ const processPayment = () => {
 }
 
 const processWhatsAppOrder = () => {
-  const isPanitia = checkoutForm.value.paymentMethod === 'panitia'
   let text = `Halo IT's Food Time! Saya ingin memesan:\n\n`
-  text += `*ID Pesanan:* ${orderId.value}\n`
+  text += `*Order ID:* ${orderId.value}\n`
   text += `*Nama:* ${checkoutForm.value.name}\n`
-  
-  if (isPanitia) {
-    text += `*Panitia ID:* ${checkoutForm.value.panitiaId}\n`
-    text += `*Prodi:* ${checkoutForm.value.prodi}\n`
-    text += `*Kelas:* ${checkoutForm.value.kelas}\n`
-  } else {
-    text += `*No HP:* ${checkoutForm.value.phone}\n`
-    text += `*Alamat Pengiriman:* ${checkoutForm.value.address}\n`
-  }
-  
+  text += `*No HP:* ${checkoutForm.value.phone}\n`
+  text += `*Alamat Pengiriman:* ${checkoutForm.value.address}\n`
   text += `*Metode Pembayaran:* ${checkoutForm.value.paymentMethod.toUpperCase()}\n\n`
   text += `*Detail Pesanan:*\n`
   
-  cart.value.forEach(item => {
-    text += `- ${item.name} (${item.quantity}x) : ${formatPrice(item.price * item.quantity)}\n`
+  const items = isFromInvoice ? data.items : data.items
+  items.forEach(item => {
+    text += `Produk : ${item.name}\n`
+    text += `Jumlah Pesanan: ${item.quantity}\n`
   })
   
-  text += `\n*TOTAL PEMBAYARAN: ${formatPrice(cartTotal.value)}*`
+  text += `Total: ${formatPrice(data.total)}\n`
+  text += `Metode Pembayaran: ${data.method === 'qris' ? 'QRIS' : 'Bayar di Tempat (COD)'}\n\n`
   
-  const phone = '6281234567890'
+  text += `Kirimkan bukti setelah pembayaran ya!\n`
+  text += `Terima Kasih ❤️`
+  
+  return text
+}
+
+const sendWhatsAppOrder = () => {
+  const text = constructWhatsAppMessage()
+  const phone = '6281296379040'
   const url = `https://wa.me/${phone}?text=${encodeURIComponent(text)}`
-  window.open(url, '_blank')
   
-  // Clear cart after checkout
+  // Reset and go home before redirect
   cart.value = []
+  navigateTo('home')
+  
+  // Redirect in same tab
+  window.location.href = url
+}
+
+const processWhatsAppOrder = () => {
+  const text = constructWhatsAppMessage(true)
+  if (!text) return
+  
+  const phone = '6281296379040'
+  const url = `https://wa.me/${phone}?text=${encodeURIComponent(text)}`
+  window.location.href = url
 }
 
 const scrollToSection = (id) => {
@@ -411,11 +335,182 @@ const broadcastLaunchNotification = async () => {
 }
 
 // Expose to window for manual trigger during dev
+// Expose to window for manual trigger during dev
 if (typeof window !== 'undefined') {
   window.broadcastLaunch = broadcastLaunchNotification;
 }
 
+// --- Supabase Methods ---
+const fetchProducts = async () => {
+  try {
+    const { data, error } = await supabase.from('products').select('*')
+    if (error) throw error
+
+    // Map Supabase products to App structure
+    menu.value = data.map(p => {
+      let imageName = '/logo/logo1.png'
+      const lowerName = (p.product_name || p.name || '').toLowerCase().replace(/\s/g, '')
+      const cat = p.category ? p.category.toLowerCase() : ''
+      
+      if (p.image_url || p.img) {
+        imageName = p.image_url || p.img
+      } else {
+        // Map category names to folder names
+        let folder = ''
+        if (cat.includes('bundling')) folder = 'bundling'
+        else if (cat.includes('utama') || cat.includes('main')) folder = 'maincourse'
+        else if (cat.includes('sidedish') || cat.includes('snack')) folder = 'snacks'
+        else if (cat.includes('drink')) folder = 'drinks'
+
+        // Specific overrides and filename handling
+        let fileName = lowerName
+        if (lowerName.includes('dimsum')) {
+          folder = 'maincourse'
+          fileName = 'dimsum'
+        } else if (lowerName.includes('lemonade')) {
+          folder = 'drinks'
+          fileName = 'brazilianlemonade'
+        } else if (lowerName.includes('ricebowl')) {
+          folder = 'maincourse'
+          fileName = 'ricebowl'
+        } else if (lowerName.includes('jasuke')) {
+          folder = 'snacks'
+          fileName = 'jasuke'
+        }
+
+        if (folder) {
+          imageName = `/${folder}/${fileName}.png`
+        }
+      }
+
+      return {
+        id: p.id || p.product_id,
+        name: p.product_name || p.name,
+        desc: p.description || p.desc,
+        price: p.price,
+        stock: p.stock_qty || p.stock || 0,
+        variant: p.variant || '',
+        popular: p.popular !== undefined ? p.popular : true,
+        img: imageName
+      }
+    })
+    
+    // bundles now derived automatically via computed from menu
+  } catch (error) {
+    console.error('Error fetching products:', error)
+  }
+}
+
+const handleLogin = async () => {
+  const name = loginForm.value.email.trim() // Using email field as name
+  const password = loginForm.value.password.trim()
+  
+  if (!name || !password) {
+    alert('Mohon isi nama dan password.')
+    return
+  }
+  
+  isDashboardLoading.value = true
+  try {
+    const { data: users, error } = await supabase
+      .from('users')
+      .select('*')
+      .eq('name', name)
+      .single()
+    
+    if (error || !users) {
+      console.log("Login Error:", error)
+      alert('Nama atau kata sandi salah.')
+      return
+    }
+
+    // Debugging logs
+    console.log("User found:", users)
+    console.log("DB Hash:", users.password_hash)
+
+    try {
+      // Compare password using bcrypt.compare()
+      const isValid = await bcrypt.compare(password, users.password_hash)
+      console.log("Is Valid:", isValid)
+
+      if (isValid) {
+        isLoggedIn.value = true
+        currentUser.value = users
+        
+        // Simple session storage
+        localStorage.setItem('food_time_session', JSON.stringify({
+          isLoggedIn: true,
+          user: users
+        }))
+        
+        currentPage.value = 'dashboard'
+        navigateTo('dashboard')
+      } else {
+        alert('Nama atau kata sandi salah.')
+      }
+    } catch (bcryptErr) {
+      console.error('Bcrypt compare error:', bcryptErr)
+      alert('Terjadi kesalahan pada enkripsi.')
+    }
+  } catch (error) {
+    console.error('Login error:', error)
+    alert('Terjadi kesalahan saat login: ' + (error.message || 'Cek koneksi atau database.'))
+  } finally {
+    isDashboardLoading.value = false
+  }
+}
+
+const fetchInvoiceDetail = async (invNumber) => {
+  if (!invNumber) return
+  isInvoiceLoading.value = true
+  try {
+    const { data, error } = await supabase
+      .from('orders')
+      .select(`
+        *,
+        customers (*),
+        order_items (
+          *,
+          products (*)
+        )
+      `)
+      .eq('invoice_number', invNumber)
+      .single()
+    
+    if (error) throw error
+
+    if (data) {
+      invoiceData.value = {
+        id: data.invoice_number,
+        date: new Date(data.created_at).toLocaleDateString(),
+        method: data.payment_method,
+        status: data.order_status,
+        customer_name: data.customers?.full_name || 'Pelanggan',
+        items: data.order_items.map(ti => ({
+          name: ti.products?.product_name || 'Produk',
+          quantity: ti.qty,
+          price: ti.price,
+          subtotal: ti.subtotal
+        })),
+        total: data.total_amount
+      }
+    }
+  } catch (error) {
+    console.error('Error fetching invoice:', error)
+  } finally {
+    isInvoiceLoading.value = false
+  }
+}
+
+const handleLogout = () => {
+  isLoggedIn.value = false
+  currentUser.value = null
+  localStorage.removeItem('food_time_session')
+  navigateTo('home')
+}
+
 let countdownInterval = null
+
 
 // --- Lifecycle & Scroll Tracking ---
 let scrollObserver = null
@@ -466,6 +561,45 @@ onMounted(() => {
   updateCountdown()
   countdownInterval = setInterval(updateCountdown, 1000)
   
+  fetchProducts()
+  
+  // Check session
+  const savedSession = localStorage.getItem('food_time_session')
+  if (savedSession) {
+    try {
+      const session = JSON.parse(savedSession)
+      if (session.isLoggedIn && session.user) {
+        isLoggedIn.value = true
+        currentUser.value = session.user
+      }
+    } catch (e) {
+      localStorage.removeItem('food_time_session')
+    }
+  }
+
+  // Handle routes based on URL path
+  const path = window.location.pathname
+  const params = new URLSearchParams(window.location.search)
+  const orderIdFromUrl = params.get('order_id')
+
+  if (path === '/login-admin') {
+    currentPage.value = 'login'
+  } else if (path === '/dashboard') {
+    if (!isLoggedIn.value) {
+      currentPage.value = 'login'
+    } else {
+      currentPage.value = 'dashboard'
+    }
+  } else if (path === '/invoice') {
+    currentPage.value = 'invoice'
+    if (orderIdFromUrl) {
+      orderId.value = orderIdFromUrl
+      fetchInvoiceDetail(orderIdFromUrl)
+    }
+  } else if (path === '/all-menu') {
+    currentPage.value = 'all-menu'
+  }
+  
   setTimeout(() => {
     isAppLoading.value = false
     setTimeout(() => {
@@ -507,22 +641,29 @@ onMounted(() => {
           
           <div class="header-center hidden-mobile">
             <nav class="desktop-nav">
-              <a href="#hero" @click.prevent="navigateTo('home'); setTimeout(() => { window.location.hash='hero' }, 100)" class="nav-link">Beranda</a>
+              <a href="#hero" @click.prevent="navigateTo('home'); setTimeout(() => { window.location.hash='hero' }, 100)" class="nav-link">Home</a>
               <a href="#menu" @click.prevent="navigateTo('home'); setTimeout(() => { window.location.hash='menu' }, 100)" class="nav-link">Menu</a>
-              <a href="#bundles" @click.prevent="navigateTo('home'); setTimeout(() => { window.location.hash='bundles' }, 100)" class="nav-link">Paket</a>
+              <a href="#bundles" @click.prevent="navigateTo('home'); setTimeout(() => { window.location.hash='bundles' }, 100)" class="nav-link">Bundles</a>
             </nav>
           </div>
           
           <!-- Action Buttons -->
           <div class="header-right">
             <button class="cart-btn" @click="navigateTo('cart')">
-              <span class="cart-label hidden-mobile">Keranjang</span>
+              <span class="cart-label hidden-mobile">Cart</span>
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/>
                 <path d="M16 10a4 4 0 0 1-8 0"/>
               </svg>
               <div class="cart-badge" v-if="cart.length > 0">{{ cart.length }}</div>
             </button>
+            <!-- Login Button Hidden (Access via /login-admin), visible only if logged in -->
+            <button class="user-btn" @click="navigateTo('dashboard')" v-if="isLoggedIn && !isComingSoon" title="Dashboard">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                <circle cx="12" cy="7" r="4"></circle>
+              </svg>
+            </button> 
           </div>
         </div>
         
@@ -567,7 +708,7 @@ onMounted(() => {
           <!-- Top Marquee (Under Header) -->
           <div class="marquee-divider cs-top-marquee">
             <div class="marquee-track smooth">
-              <span v-for="n in 15" :key="n">SEGERA HADIR ✦ </span>
+              <span v-for="n in 15" :key="n">COMING SOON </span>
             </div>
           </div>
 
@@ -603,7 +744,7 @@ onMounted(() => {
               <!-- Registration Form -->
               <div class="cs-form-container">
                 <div v-if="!isSubmitted" class="cs-form-wrapper">
-                  <h3>Dapatkan Notifikasi Saat Kami Rilis</h3>
+                  <h3>Get Notified When We Launch</h3>
                   <form @submit.prevent="submitRegistration" class="cs-form">
                     <input type="text" v-model="regForm.name" placeholder="Nama Anda" required />
                     <input type="email" v-model="regForm.email" placeholder="Alamat Email Anda" required />
@@ -634,12 +775,12 @@ onMounted(() => {
           <section id="hero" class="hero-full">
             <div class="hero-overlay">
               <div class="container hero-content-centered">
-                <!-- <div class="badge">Diskon Khusus Mahasiswa 20%</div> -->
-                <h1>Kumpul & Makan dengan Ceria,<br/><span class="text-primary">Serasa di Rumah!</span></h1>
-                <p>Bosan dengan makanan kampus? IT's Food Time menghadirkan makanan segar, panas, dan lezat tempat semua orang bisa berkumpul dengan nyaman.</p>
+                <div class="badge">Student Special DiSC 20%</div>
+                <h1>Gather & Eat with Joy,<br/><span class="text-primary">Just like Home!</span></h1>
+                <p>Tired of campus meals? IT's Food Time brings you fresh, hot, and tasty food where everyone can gather comfortably.</p>
                 <div class="hero-actions">
-                  <a href="#menu" class="btn btn-primary">Pesan Sekarang</a>
-                  <a href="#bundles" class="btn btn-outline-light">Lihat Paket</a>
+                  <a href="#menu" class="btn btn-primary">Order Now</a>
+                  <a href="#bundles" class="btn btn-outline-light">View Combos</a>
                 </div>
               </div>
             </div>
@@ -656,32 +797,15 @@ onMounted(() => {
           <section id="menu" class="menu-section">
             <div class="container">
               <div class="section-header">
-                <h2>Lagi pengen sesuatu?</h2>
-                <p>Pilih dari menu andalan kami yang baru dibuat</p>
+                <h2>Craving for something?</h2>
+                <p>Select from our freshly made signatures</p>
               </div>
               
-              <div class="categories-container">
-                <div class="categories">
-                  <button 
-                    v-for="cat in categories" 
-                    :key="cat"
-                    class="cat-pill"
-                    :class="{ active: activeCategory === cat }"
-                    @click="activeCategory = cat"
-                  >
-                    {{ cat }}
-                  </button>
-                </div>
-              </div>
 
               <div class="menu-grid">
                 <div class="menu-card" v-for="item in filteredMenu" :key="item.id" @click="openFoodDetail(item)">
                   <div class="card-img-wrapper">
-                    <span class="popular-badge" v-if="item.popular">Populer</span>
-                    <div class="rating-badge">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="star-icon"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
-                      {{ item.rating }}
-                    </div>
+                    <span class="popular-badge" v-if="item.popular">Popular</span>
                     <img :src="item.img" :alt="item.name" loading="lazy" />
                   </div>
                   <div class="card-content">
@@ -703,7 +827,7 @@ onMounted(() => {
               </div>
 
               <!-- See All Menu Button - Only visible when "All" (Popular) active -->
-              <div class="see-all-container" v-if="activeCategory === 'Semua'">
+              <div class="see-all-container" v-if="activeCategory === 'All'">
                 <button class="btn btn-outline see-all-btn" @click="navigateTo('all-menu')">
                   Lihat Semua Menu
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
@@ -723,8 +847,8 @@ onMounted(() => {
           <section id="bundles" class="bundles-section">
             <div class="container">
               <div class="section-header">
-                <h2>Paket Hemat Terbaik</h2>
-                <p>Hemat lebih banyak dengan paket spesial kami, khusus untuk mahasiswa!</p>
+                <h2>Best Value Bundles</h2>
+                <p>Save more with our special combos, exclusively for students!</p>
               </div>
               <div class="bundles-grid">
                 <div class="bundle-card" v-for="bundle in bundles" :key="bundle.id" @click="openFoodDetail(bundle)">
@@ -737,7 +861,6 @@ onMounted(() => {
                       <p>{{ bundle.desc }}</p>
                       <div class="price-row">
                         <span class="price">{{ formatPrice(bundle.price) }}</span>
-                        <span class="old-price">{{ formatPrice(bundle.oldPrice) }}</span>
                       </div>
                     </div>
                     <button class="btn btn-primary bundle-btn" @click.stop="openFoodDetail(bundle)">
@@ -825,45 +948,21 @@ onMounted(() => {
               <div class="checkout-form">
                 <div class="form-section">
                   <div class="checkout-title-with-icon">
-                    <span class="icon-circle">{{ checkoutForm.paymentMethod === 'panitia' ? '👤' : '📍' }}</span>
-                    <h3>{{ checkoutForm.paymentMethod === 'panitia' ? 'Detail Panitia' : 'Detail Pengiriman' }}</h3>
+                    <span class="icon-circle">📍</span>
+                    <h3>Delivery Details</h3>
                   </div>
-                  
-                  <!-- Standard Delivery Fields -->
-                  <template v-if="checkoutForm.paymentMethod !== 'panitia'">
-                    <div class="form-group">
-                      <label>Nama Lengkap</label>
-                      <input type="text" v-model="checkoutForm.name" placeholder="John Doe" required />
-                    </div>
-                    <div class="form-group">
-                      <label>No. Telepon</label>
-                      <input type="tel" v-model="checkoutForm.phone" placeholder="0812xxxxxx" required />
-                    </div>
-                    <div class="form-group">
-                      <label>Alamat Lengkap</label>
-                      <textarea v-model="checkoutForm.address" placeholder="Asrama Mahasiswa Blok C, Kamar 101" rows="3" required></textarea>
-                    </div>
-                  </template>
-
-                  <!-- Panitia Fields -->
-                  <template v-else>
-                    <div class="form-group">
-                      <label>Panitia ID</label>
-                      <input type="text" v-model="checkoutForm.panitiaId" placeholder="PNT-001" required />
-                    </div>
-                    <div class="form-group">
-                      <label>Nama</label>
-                      <input type="text" v-model="checkoutForm.name" placeholder="John Doe" required />
-                    </div>
-                    <div class="form-group">
-                      <label>Prodi</label>
-                      <input type="text" v-model="checkoutForm.prodi" placeholder="contoh: S1 Sistem Informasi" required />
-                    </div>
-                    <div class="form-group">
-                      <label>Kelas</label>
-                      <input type="text" v-model="checkoutForm.kelas" placeholder="contoh: S1-IT-KJ-24" required />
-                    </div>
-                  </template>
+                  <div class="form-group">
+                    <label>Full Name</label>
+                    <input type="text" v-model="checkoutForm.name" placeholder="John Doe" required />
+                  </div>
+                  <div class="form-group">
+                    <label>Phone Number</label>
+                    <input type="tel" v-model="checkoutForm.phone" placeholder="0812xxxxxx" required />
+                  </div>
+                  <div class="form-group">
+                    <label>Complete Address</label>
+                    <textarea v-model="checkoutForm.address" placeholder="Student Dormitory Block C, Room 101" rows="3" required></textarea>
+                  </div>
                 </div>
                 <div class="form-section mt-4">
                   <div class="checkout-title-with-icon">
@@ -873,17 +972,14 @@ onMounted(() => {
                   <div class="payment-options">
                     <label class="payment-card" :class="{ selected: checkoutForm.paymentMethod === 'qris' }">
                       <input type="radio" value="qris" v-model="checkoutForm.paymentMethod">
-                      <div class="payment-info"><strong>QRIS</strong><span>Scan dengan E-Wallet apa saja</span></div>
+                      <div class="payment-info"><strong>QRIS</strong><span>Scan with any E-Wallet</span></div>
                     </label>
                     <label class="payment-card" :class="{ selected: checkoutForm.paymentMethod === 'cash' }">
                       <input type="radio" value="cash" v-model="checkoutForm.paymentMethod">
-                      <div class="payment-info"><strong>Cash on Delivery</strong><span>Bayar saat pesanan tiba</span></div>
-                    </label>
-                    <label class="payment-card" :class="{ selected: checkoutForm.paymentMethod === 'panitia' }">
-                      <input type="radio" value="panitia" v-model="checkoutForm.paymentMethod">
-                      <div class="payment-info"><strong>Panitia</strong><span>Bayar via Panitia IT's Food Time</span></div>
+                      <div class="payment-info"><strong>Cash on Delivery</strong><span>Pay when food arrives</span></div>
                     </label>
                   </div>
+                  <!-- Note: QRIS image removed from here as per new flow to use a dedicated page -->
                 </div>
               </div>
               <div class="cart-summary-card">
@@ -908,37 +1004,44 @@ onMounted(() => {
         <!-- ==================== PAGE: INVOICE ==================== -->
         <div class="page-container" v-else-if="currentPage === 'invoice'">
           <div class="container invoice-content">
-            <div class="invoice-card">
+            <div v-if="isInvoiceLoading" class="invoice-loading-state">
+              <div class="spinner"></div>
+              <p>Mengambil detail pesanan Anda...</p>
+            </div>
+            <div v-else-if="invoiceData" class="invoice-card">
               <div class="success-icon">✓</div>
               <h2>Pesanan Dikonfirmasi!</h2>
               <p class="invoice-subtitle">Terima kasih telah memesan di IT's Food Time</p>
               <div class="invoice-details">
-                <div class="invoice-row"><span class="label">ID Pesanan:</span><span class="value order-id">{{ orderId }}</span></div>
-                <div class="invoice-row"><span class="label">Tanggal:</span><span class="value">{{ new Date().toLocaleDateString() }}</span></div>
-                <div class="invoice-row"><span class="label">Metode Pembayaran:</span><span class="value capitalize">{{ checkoutForm.paymentMethod }}</span></div>
-                <template v-if="checkoutForm.paymentMethod === 'panitia'">
-                  <div class="invoice-row"><span class="label">Panitia ID:</span><span class="value">{{ checkoutForm.panitiaId }}</span></div>
-                  <div class="invoice-row"><span class="label">Prodi:</span><span class="value">{{ checkoutForm.prodi }}</span></div>
-                  <div class="invoice-row"><span class="label">Kelas:</span><span class="value">{{ checkoutForm.kelas }}</span></div>
-                </template>
+                <div class="invoice-row"><span class="label">Order ID:</span><span class="value order-id">{{ orderId }}</span></div>
+                <div class="invoice-row"><span class="label">Date:</span><span class="value">{{ new Date().toLocaleDateString() }}</span></div>
+                <div class="invoice-row"><span class="label">Payment Method:</span><span class="value capitalize">{{ checkoutForm.paymentMethod }}</span></div>
               </div>
+
+              <!-- QRIS Display for Invoice -->
+              <div v-show="invoiceData.method === 'qris'" 
+                   style="margin-top: 20px; padding: 20px; background-color: #f0f9ff; border: 2px dashed #3b82f6; border-radius: 12px; text-align: center;">
+                <p style="margin-bottom: 10px; font-weight: bold; color: #1e40af;">Silakan scan QRIS untuk menyelesaikan pembayaran:</p>
+                <img src="/QRIS.jpeg" alt="QRIS" style="max-width: 250px; width: 100%; height: auto; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);" />
+              </div>
+
               <div class="invoice-items">
-                <h4>Item yang Dipesan</h4>
+                <h4>Items Ordered</h4>
                 <div class="summary-row text-sm" v-for="item in cart" :key="item.id">
                   <span>{{ item.quantity }}x {{ item.name }}</span>
                   <span>{{ formatPrice(item.price * item.quantity) }}</span>
                 </div>
                 <hr class="summary-divider mt-3" />
                 <div class="summary-row total">
-                  <span>Total Dibayar</span>
+                  <span>Total Paid</span>
                   <span>{{ formatPrice(cartTotal) }}</span>
                 </div>
               </div>
               <div class="invoice-actions">
                 <button class="btn btn-primary wa-btn w-full" @click="processWhatsAppOrder">
-                  Kirim Invoice melalui WhatsApp
+                  Send Invoice via WhatsApp
                 </button>
-                <button class="btn btn-outline w-full mt-3" @click="navigateTo('home'); cart=[]">Kembali ke Beranda</button>
+                <button class="btn btn-outline w-full mt-3" @click="navigateTo('home'); cart=[]">Back to Home</button>
               </div>
             </div>
           </div>
@@ -952,35 +1055,8 @@ onMounted(() => {
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
                 Kembali ke Beranda
               </button>
-              <h2>Jelajahi Menu Lengkap Kami</h2>
-              <p>Pilihan Makanan dan Minuman</p>
-            </div>
-
-            <!-- Bundling Section in All Menu -->
-            <div class="menu-category-section">
-              <div class="category-divider">
-                <span>Paket Bundling Hemat</span>
-              </div>
-              <div class="bundles-grid">
-                <div class="bundle-card" v-for="bundle in bundles" :key="bundle.id" @click="openFoodDetail(bundle)">
-                  <div class="bundle-img-wrapper">
-                    <img :src="bundle.img" :alt="bundle.name" class="bundle-img"/>
-                  </div>
-                  <div class="bundle-content">
-                    <div class="bundle-info">
-                      <h3>{{ bundle.name }}</h3>
-                      <p>{{ bundle.desc }}</p>
-                      <div class="price-row">
-                        <span class="price">{{ formatPrice(bundle.price) }}</span>
-                        <span class="old-price">{{ formatPrice(bundle.oldPrice) }}</span>
-                      </div>
-                    </div>
-                    <button class="btn btn-primary bundle-btn" @click.stop="openFoodDetail(bundle)">
-                      Lihat Detail
-                    </button>
-                  </div>
-                </div>
-              </div>
+              <h2>Explore Our Full Menu</h2>
+              <p>Selection of Main Courses, Snacks, and Drinks</p>
             </div>
 
             <div v-for="(items, categoryName) in categorizedMenu" :key="categoryName" class="menu-category-section">
@@ -992,25 +1068,16 @@ onMounted(() => {
                 <div class="menu-card" v-for="item in items" :key="item.id" @click="openFoodDetail(item)">
                   <div class="card-img-wrapper">
                     <span class="popular-badge" v-if="item.popular">Popular</span>
-                    <div class="rating-badge">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="star-icon"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
-                      {{ item.rating }}
-                    </div>
                     <img :src="item.img" :alt="item.name" loading="lazy" />
                   </div>
                   <div class="card-content">
                     <div class="card-title">{{ item.name }}</div>
                     <div class="card-desc">{{ item.desc }}</div>
-                    <div class="card-footer-modern">
-                      <div class="price-section">
-                        <span class="price-small">Harga</span>
-                        <span class="price-val">{{ formatPrice(item.price) }}</span>
-                      </div>
-                      <div class="card-actions" @click.stop>
-                        <button class="add-to-cart-btn" @click="addDirectToCart(item)" aria-label="Tambah ke keranjang">
-                          Tambah
-                        </button>
-                      </div>
+                    <div class="card-footer">
+                      <span class="price">{{ formatPrice(item.price) }}</span>
+                      <button class="add-btn" @click.stop="addDirectToCart(item)">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -1018,6 +1085,25 @@ onMounted(() => {
             </div>
           </div>
         </div>
+
+        <!-- ==================== PAGE: LOGIN ==================== -->
+        <AdminLogin 
+          v-else-if="currentPage === 'login'" 
+          :loginForm="loginForm"
+          :isDashboardLoading="isDashboardLoading"
+          @login="handleLogin"
+          @navigate="navigateTo"
+        />
+
+        <!-- ==================== PAGE: DASHBOARD ==================== -->
+        <AdminDashboard
+          v-else-if="currentPage === 'dashboard'"
+          :currentUser="currentUser"
+          :menu="menu"
+          @logout="handleLogout"
+          @refresh-products="fetchProducts"
+        />
+
 
       </main>
 
@@ -1074,6 +1160,9 @@ onMounted(() => {
           </div>
         </div>
       </div>
+
+      <!-- EDIT PRODUCT MODAL MOVED TO AdminDashboard.vue -->
+
     </div>
   </div>
 </template>
@@ -1090,7 +1179,281 @@ onMounted(() => {
 .app-container.mounted {
   opacity: 1;
 }
+
+/* NEW ADDITIONS FOR LOGIN & DASHBOARD */
+.login-content {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 80vh;
+}
+.login-card {
+  background: white;
+  padding: 3rem;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  width: 100%;
+  max-width: 450px;
+  border: 1px solid var(--border);
+}
+.login-header-section {
+  text-align: center;
+  margin-bottom: 2.5rem;
+}
+.login-form-ui .form-group {
+  margin-bottom: 1.5rem;
+}
+.login-form-ui label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+  color: var(--text-dark);
+}
+.login-form-ui input {
+  width: 100%;
+  padding: 0.8rem 1rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  font-size: 1rem;
+  transition: border-color 0.2s;
+}
+.login-form-ui input:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.dashboard-content {
+  padding-top: 3rem;
+  padding-bottom: 5rem;
+}
+.dashboard-header-ui {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 3rem;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+}
+.dashboard-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+}
+.dashboard-tabs {
+  display: flex;
+  background: #f1f5f9;
+  padding: 0.4rem;
+  border-radius: var(--radius-md);
+  gap: 0.25rem;
+}
+.tab-btn {
+  padding: 0.6rem 1.2rem;
+  border-radius: 10px;
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: var(--text-light);
+  transition: all 0.2s;
+}
+.tab-btn.active {
+  background: white;
+  color: var(--primary);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Manage Products Styles */
+.product-cell {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+.mini-thumb {
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+}
+.badge-cat {
+  background: #f1f5f9;
+  color: #64748b;
+  padding: 0.2rem 0.6rem;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+.action-btns-list {
+  display: flex;
+  gap: 0.5rem;
+}
+.btn-icon-small {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: white;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.btn-icon-small.edit:hover { background: #eff6ff; border-color: #3b82f6; color: #3b82f6; }
+.btn-icon-small.delete:hover { background: #fef2f2; border-color: #ef4444; color: #ef4444; }
+
+.btn-outline-sm {
+  padding: 0.4rem 1rem;
+  font-size: 0.8rem;
+  border: 1px solid var(--border);
+  background: white;
+  border-radius: var(--radius-sm);
+}
+.btn-danger-sm {
+  padding: 0.4rem 1rem;
+  font-size: 0.8rem;
+  border: 1px solid #fee2e2;
+  background: #fef2f2;
+  color: #ef4444;
+  border-radius: var(--radius-sm);
+}
+
+/* Edit Modal */
+.edit-modal-card {
+  background: white;
+  width: 90%;
+  max-width: 600px;
+  padding: 2.5rem;
+  border-radius: var(--radius-lg);
+  box-shadow: 0 20px 50px rgba(0,0,0,0.1);
+  position: relative;
+}
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2rem;
+}
+.checkbox-group {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+.checkbox-group input {
+  width: 18px;
+  height: 18px;
+}
+
+
+/* QRIS UI */
+
+.qris-container {
+  margin-top: 1.5rem;
+  padding: 1.5rem;
+  background: #f8fafc;
+  border-radius: var(--radius-lg);
+  border: 1px dashed var(--border);
+  text-align: center;
+}
+.qris-instruction {
+  font-size: 0.9rem;
+  color: var(--text-light);
+  margin-bottom: 1rem;
+  font-weight: 500;
+}
+.qris-image-wrapper {
+  background: white;
+  padding: 1rem;
+  border-radius: var(--radius-md);
+  display: inline-block;
+  box-shadow: var(--shadow-sm);
+}
+.qris-checkout-img {
+  max-width: 200px;
+  width: 100%;
+  height: auto;
+  border-radius: 4px;
+}
+
+/* QRIS Payment Page Styles */
+.qris-payment-page {
+  padding-top: 3rem;
+  padding-bottom: 5rem;
+  display: flex;
+  justify-content: center;
+}
+.qris-payment-card {
+  background: white;
+  padding: 3rem;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  max-width: 700px;
+  width: 100%;
+  text-align: center;
+  border: 1px solid var(--border);
+}
+.qris-header h2 {
+  font-size: 2rem;
+  margin-bottom: 0.5rem;
+}
+.qris-header p {
+  color: var(--text-light);
+  margin-bottom: 2.5rem;
+}
+.qris-main-display {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2.5rem;
+  align-items: center;
+  margin-bottom: 3rem;
+  text-align: left;
+}
+.qris-large-wrapper {
+  background: white;
+  padding: 1.5rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+}
+.qris-full-img {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.payment-instructions ol {
+  padding-left: 1.25rem;
+  color: var(--text-dark);
+}
+.payment-instructions li {
+  margin-bottom: 0.75rem;
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+.qris-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.wa-confirm-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 1.2rem;
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+@media (max-width: 600px) {
+  .qris-main-display {
+    grid-template-columns: 1fr;
+    text-align: center;
+  }
+  .qris-payment-card {
+    padding: 2rem 1.5rem;
+  }
+}
+
 .no-scroll {
+
   overflow: hidden;
   height: 100vh;
 }
@@ -1165,6 +1528,7 @@ onMounted(() => {
   backdrop-filter: blur(15px);
   z-index: 50;
   border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+  padding-bottom: 1.25rem;
 }
 .header-grid {
   display: grid;
@@ -1200,6 +1564,24 @@ onMounted(() => {
   padding: 0.5rem 1.5rem;
   border-radius: var(--radius-full);
 }
+.user-btn {
+  background: white;
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-full);
+  color: var(--text-dark);
+  border: 1px solid rgba(0,0,0,0.05);
+  transition: all 0.3s;
+}
+.user-btn:hover {
+  background: var(--primary);
+  color: white;
+  transform: scale(1.05);
+}
+
 .nav-link {
   font-weight: 600;
   color: var(--text-light);
@@ -1317,17 +1699,6 @@ onMounted(() => {
   color: white;
   max-width: 800px;
 }
-.hero-content-centered .badge {
-  background: rgba(255,255,255,0.15);
-  backdrop-filter: blur(8px);
-  color: white;
-  border: 1px solid rgba(255,255,255,0.3);
-  font-weight: 700;
-  font-size: 0.9rem;
-  padding: 0.6rem 1.5rem;
-  border-radius: var(--radius-full);
-  margin-bottom: 2rem;
-}
 .hero-content-centered h1 {
   font-size: 4.5rem;
   line-height: 1.1;
@@ -1398,6 +1769,9 @@ onMounted(() => {
 
 
 /* ================= MENU & BUNDLES ================= */
+.menu-section {
+  padding-top: 6rem;
+}
 .section-header {
   text-align: center;
   margin-bottom: 3.5rem;
@@ -2799,14 +3173,35 @@ onMounted(() => {
   padding-bottom: 0.5rem;
 }
 .mt-3 { margin-top: 1.5rem; }
-.wa-btn {
-  background: #25D366; 
-  padding: 1rem;
-  box-shadow: 0 8px 20px rgba(37, 211, 102, 0.25);
-  border-color: #25D366;
-  color: white;
-}
 .wa-btn:hover { background: #1faf53; color: white; border-color:#1faf53; }
+
+.invoice-loading-state, .error-state {
+  background: white;
+  padding: 4rem;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  text-align: center;
+  margin-top: 2rem;
+}
+
+.spinner {
+  width: 40px;
+  height: 40px;
+  border: 4px solid #f3f3f3;
+  border-top: 4px solid var(--primary);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin: 0 auto 1.5rem;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.badge-status.success { background: #dcfce7; color: #166534; }
+.badge-status.pending { background: #fef3c7; color: #92400e; }
+.badge-status.failed { background: #fee2e2; color: #ef4444; }
 
 
 /* Mobile Bottom Navigation Hidden by Default */
@@ -3243,3 +3638,5 @@ onMounted(() => {
 }
 
 </style>
+
+
