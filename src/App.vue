@@ -9,6 +9,7 @@ import * as bcrypt from 'bcryptjs'
 
 import AdminLogin from './views/admin/AdminLogin.vue'
 import AdminDashboard from './views/admin/AdminDashboard.vue'
+import UserReviews from './components/UserReviews.vue'
 
 
 // --- State ---
@@ -20,6 +21,7 @@ const activeCategory = ref('All')
 const selectedFood = ref(null)
 const tempQuantity = ref(1)
 const activeMobileTab = ref('hero')
+const isCartSidebarOpen = ref(false)
 
 // Auth and Dashboard
 const isLoggedIn = ref(false)
@@ -42,7 +44,10 @@ const checkoutForm = ref({
   phone: '',
   email: '',
   address: '',
-  paymentMethod: 'qris'
+  paymentMethod: 'qris',
+  orderType: 'delivery',
+  orderDate: '',
+  orderTime: ''
 })
 const orderId = ref('')
 
@@ -146,6 +151,17 @@ const updateQuantity = (item, delta) => {
   }
 }
 
+const getCartItemQuantity = (id) => {
+  const existing = cart.value.find(i => i.id === id)
+  return existing ? existing.quantity : 0
+}
+
+const clearCart = () => {
+  if (confirm("Apakah Anda yakin ingin mengosongkan keranjang?")) {
+    cart.value = []
+  }
+}
+
 const navigateTo = (page) => {
   currentPage.value = page
   isCartOpen.value = false
@@ -172,41 +188,38 @@ const processPayment = () => {
   navigateTo('invoice')
 }
 
-const processWhatsAppOrder = () => {
+const constructWhatsAppMessage = (isInvoice = false) => {
   let text = `Halo IT's Food Time! Saya ingin memesan:\n\n`
-  text += `*Order ID:* ${orderId.value}\n`
-  text += `*Nama:* ${checkoutForm.value.name}\n`
-  text += `*No HP:* ${checkoutForm.value.phone}\n`
-  text += `*Alamat Pengiriman:* ${checkoutForm.value.address}\n`
-  text += `*Metode Pembayaran:* ${checkoutForm.value.paymentMethod.toUpperCase()}\n\n`
-  text += `*Detail Pesanan:*\n`
   
-  const items = isFromInvoice ? data.items : data.items
-  items.forEach(item => {
-    text += `Produk : ${item.name}\n`
-    text += `Jumlah Pesanan: ${item.quantity}\n`
-  })
+  if (isInvoice && invoiceData.value) {
+    const data = invoiceData.value
+    text += `*Order ID:* ${data.id}\n`
+    text += `*Nama:* ${data.customer_name}\n\n`
+    text += `*Detail Pesanan:*\n`
+    data.items.forEach(item => {
+      text += `- ${item.name} (${item.quantity}x)\n`
+    })
+    text += `\n*Total:* ${formatPrice(data.total)}\n`
+    text += `*Metode Pembayaran:* ${data.method === 'qris' ? 'QRIS' : 'Bayar di Tempat (COD)'}\n`
+  } else {
+    text += `*Order ID:* ${orderId.value}\n`
+    text += `*Nama:* ${checkoutForm.value.name}\n`
+    text += `*No HP:* ${checkoutForm.value.phone}\n`
+    text += `*Alamat Pengiriman:* ${checkoutForm.value.address}\n`
+    text += `*Metode Pembayaran:* ${checkoutForm.value.paymentMethod.toUpperCase()}\n\n`
+    text += `*Detail Pesanan:*\n`
+    
+    cart.value.forEach(item => {
+      text += `- ${item.name} (${item.quantity}x)\n`
+    })
+    
+    text += `\n*Total:* ${formatPrice(cartTotal.value)}\n`
+  }
   
-  text += `Total: ${formatPrice(data.total)}\n`
-  text += `Metode Pembayaran: ${data.method === 'qris' ? 'QRIS' : 'Bayar di Tempat (COD)'}\n\n`
-  
-  text += `Kirimkan bukti setelah pembayaran ya!\n`
+  text += `\nKirimkan bukti setelah pembayaran ya!\n`
   text += `Terima Kasih ❤️`
   
   return text
-}
-
-const sendWhatsAppOrder = () => {
-  const text = constructWhatsAppMessage()
-  const phone = '6281296379040'
-  const url = `https://wa.me/${phone}?text=${encodeURIComponent(text)}`
-  
-  // Reset and go home before redirect
-  cart.value = []
-  navigateTo('home')
-  
-  // Redirect in same tab
-  window.location.href = url
 }
 
 const processWhatsAppOrder = () => {
@@ -649,7 +662,7 @@ onMounted(() => {
           
           <!-- Action Buttons -->
           <div class="header-right">
-            <button class="cart-btn" @click="navigateTo('cart')">
+            <button class="cart-btn" @click="isCartSidebarOpen = true">
               <span class="cart-label hidden-mobile">Cart</span>
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/>
@@ -684,7 +697,7 @@ onMounted(() => {
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h18a2 2 0 0 1 2 2v1h-3a4 4 0 0 1-8 0H1v-1a2 2 0 0 1 2-2z"/><path d="M12 13a7 7 0 0 0-7 7h14a7 7 0 0 0-7-7z"/></svg>
         </a>
         <!-- Cart -->
-        <a href="#" class="mobile-nav-item" @click.prevent="navigateTo('cart')" :class="{ active: currentPage === 'cart' }">
+        <a href="#" class="mobile-nav-item" @click.prevent="isCartSidebarOpen = true" :class="{ active: isCartSidebarOpen }">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
           <div class="cart-badge-mini" v-if="cart.length > 0">{{ cart.length }}</div>
         </a>
@@ -775,7 +788,6 @@ onMounted(() => {
           <section id="hero" class="hero-full">
             <div class="hero-overlay">
               <div class="container hero-content-centered">
-                <div class="badge">Student Special DiSC 20%</div>
                 <h1>Gather & Eat with Joy,<br/><span class="text-primary">Just like Home!</span></h1>
                 <p>Tired of campus meals? IT's Food Time brings you fresh, hot, and tasty food where everyone can gather comfortably.</p>
                 <div class="hero-actions">
@@ -792,6 +804,9 @@ onMounted(() => {
               <span v-for="n in 20" :key="n">IT's Food Time ✦ </span>
             </div>
           </div>
+
+          <!-- Reviews Section -->
+          <UserReviews />
 
           <!-- Menu Section -->
           <section id="menu" class="menu-section">
@@ -817,7 +832,12 @@ onMounted(() => {
                         <span class="price-val">{{ formatPrice(item.price) }}</span>
                       </div>
                       <div class="card-actions" @click.stop>
-                        <button class="add-to-cart-btn" @click="addDirectToCart(item)" aria-label="Tambah ke keranjang">
+                        <div class="qty-controls-inline" v-if="getCartItemQuantity(item.id) > 0">
+                          <button class="qty-btn" @click="updateQuantity(item, -1)">-</button>
+                          <span class="qty-num">{{ getCartItemQuantity(item.id) }}</span>
+                          <button class="qty-btn" @click="updateQuantity(item, 1)">+</button>
+                        </div>
+                        <button class="add-to-cart-btn" @click="addDirectToCart(item)" aria-label="Tambah ke keranjang" v-else>
                           Tambah
                         </button>
                       </div>
@@ -959,9 +979,36 @@ onMounted(() => {
                     <label>Phone Number</label>
                     <input type="tel" v-model="checkoutForm.phone" placeholder="0812xxxxxx" required />
                   </div>
-                  <div class="form-group">
-                    <label>Complete Address</label>
-                    <textarea v-model="checkoutForm.address" placeholder="Student Dormitory Block C, Room 101" rows="3" required></textarea>
+                </div>
+
+                <div class="form-section mt-4">
+                  <div class="checkout-title-with-icon">
+                    <span class="icon-circle">🚚</span>
+                    <h3>Metode & Waktu</h3>
+                  </div>
+                  <div class="order-type-options">
+                    <label class="order-type-card" :class="{ selected: checkoutForm.orderType === 'delivery' }">
+                      <input type="radio" value="delivery" v-model="checkoutForm.orderType">
+                      <span>Diantar</span>
+                    </label>
+                    <label class="order-type-card" :class="{ selected: checkoutForm.orderType === 'pickup' }">
+                      <input type="radio" value="pickup" v-model="checkoutForm.orderType">
+                      <span>Diambil Sendiri</span>
+                    </label>
+                  </div>
+                  <div class="checkout-form-row mt-3">
+                    <div class="form-group">
+                      <label>Tanggal</label>
+                      <input type="date" v-model="checkoutForm.orderDate" required />
+                    </div>
+                    <div class="form-group">
+                      <label>Jam</label>
+                      <input type="time" v-model="checkoutForm.orderTime" required />
+                    </div>
+                  </div>
+                  <div class="form-group mt-3" v-if="checkoutForm.orderType === 'delivery'">
+                    <label>Alamat Pengantaran</label>
+                    <textarea v-model="checkoutForm.address" placeholder="Contoh: Gedung B Halimun, Lantai 2" rows="2" required></textarea>
                   </div>
                 </div>
                 <div class="form-section mt-4">
@@ -1073,9 +1120,14 @@ onMounted(() => {
                   <div class="card-content">
                     <div class="card-title">{{ item.name }}</div>
                     <div class="card-desc">{{ item.desc }}</div>
-                    <div class="card-footer">
+                    <div class="card-footer" @click.stop>
                       <span class="price">{{ formatPrice(item.price) }}</span>
-                      <button class="add-btn" @click.stop="addDirectToCart(item)">
+                      <div class="qty-controls-inline" v-if="getCartItemQuantity(item.id) > 0">
+                        <button class="qty-btn" @click="updateQuantity(item, -1)">-</button>
+                        <span class="qty-num">{{ getCartItemQuantity(item.id) }}</span>
+                        <button class="qty-btn" @click="updateQuantity(item, 1)">+</button>
+                      </div>
+                      <button class="add-btn" @click="addDirectToCart(item)" v-else>
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                       </button>
                     </div>
@@ -1107,8 +1159,96 @@ onMounted(() => {
 
       </main>
 
+      <!-- CART SIDEBAR -->
+      <Transition name="fade">
+        <div class="cart-sidebar-overlay" v-if="isCartSidebarOpen" @click="isCartSidebarOpen = false"></div>
+      </Transition>
+      <Transition name="slide-right">
+        <div class="cart-sidebar" v-if="isCartSidebarOpen">
+          <div class="cart-sidebar-header">
+            <div class="sidebar-header-title-group">
+              <h3>Keranjang Anda ({{ cart.length }})</h3>
+              <button v-if="cart.length > 0" class="clear-cart-btn" @click="clearCart" title="Hapus Semua">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+              </button>
+            </div>
+            <button class="close-sidebar" @click="isCartSidebarOpen = false">×</button>
+          </div>
+          
+          <div class="cart-sidebar-content">
+            <div v-if="cart.length === 0" class="cart-sidebar-empty">
+              <div class="empty-icon">🛒</div>
+              <p>Keranjang masih kosong.</p>
+            </div>
+            <div class="cart-sidebar-items" v-else>
+              <div class="cart-sidebar-item" v-for="item in cart" :key="item.id">
+                <img :src="item.img" :alt="item.name" class="sidebar-item-img" />
+                <div class="sidebar-item-details">
+                  <h4>{{ item.name }}</h4>
+                  <p class="sidebar-item-price">{{ formatPrice(item.price) }}</p>
+                  <div class="sidebar-item-actions">
+                    <div class="qty-controls-inline small">
+                      <button class="qty-btn" @click="updateQuantity(item, -1)">-</button>
+                      <span class="qty-num">{{ item.quantity }}</span>
+                      <button class="qty-btn" @click="updateQuantity(item, 1)">+</button>
+                    </div>
+                    <button class="delete-btn-modern small" @click="updateQuantity(item, -item.quantity)" aria-label="Hapus">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="cart-sidebar-footer" v-if="cart.length > 0">
+            <div class="sidebar-total">
+              <span>Subtotal</span>
+              <span class="total-val">{{ formatPrice(cartTotal) }}</span>
+            </div>
+            <div class="sidebar-actions">
+              <button class="btn btn-primary w-full" @click="navigateTo('cart'); isCartSidebarOpen = false">Lihat Keranjang</button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+
+      <!-- MODERN FOOTER -->
+      <footer class="modern-footer" v-if="!isComingSoon && currentPage === 'home'">
+        <div class="container footer-grid">
+          <div class="footer-brand">
+            <img src="/logo/logo1.png" alt="IT's Food Time Logo" class="footer-logo" />
+            <p>IT's Food Time brings you fresh, hot, and tasty food where everyone can gather comfortably.</p>
+          </div>
+          <div class="footer-links">
+            <h4>Quick Links</h4>
+            <a href="#hero" @click.prevent="navigateTo('home')">Home</a>
+            <a href="#menu" @click.prevent="navigateTo('home')">Menu</a>
+            <a href="#bundles" @click.prevent="navigateTo('home')">Bundles</a>
+          </div>
+          <div class="footer-contact">
+            <h4>Hubungi Kami</h4>
+            <div class="contact-item">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="contact-icon"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+              <p>Gedung B Halimun</p>
+            </div>
+            <div class="contact-item">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="contact-icon"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+              <p>+62 812-9637-9040</p>
+            </div>
+            <div class="contact-item">
+              <img src="/logo/instagram.png" alt="Instagram" class="footer-instagram">
+              <p>itsfoodtime24</p>
+            </div>
+          </div>
+        </div>
+        <div class="footer-bottom">
+          <p>&copy; {{ new Date().getFullYear() }} IT's Food Time. All rights reserved.</p>
+        </div>
+      </footer>
+
       <!-- DETAIL MODAL OVERLAY -->
-      <div class="modal-overlay" :class="{ 'fade-in': selectedFood }" v-if="selectedFood" @click.self="selectedFood = null">
+      <div class="modal-overlay food-detail-overlay" :class="{ 'fade-in': selectedFood }" v-if="selectedFood" @click.self="selectedFood = null">
         <div class="food-detail-modal">
           <button class="close-modal" @click="selectedFood = null">×</button>
           <div class="modal-img-wrapper">
@@ -1562,7 +1702,7 @@ onMounted(() => {
   gap: 3rem;
   background: rgba(226, 232, 240, 0.3);
   padding: 0.5rem 1.5rem;
-  border-radius: var(--radius-full);
+  border-radius: 10px;
 }
 .user-btn {
   background: white;
@@ -1571,7 +1711,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: var(--radius-full);
+  border-radius: 10px;
   color: var(--text-dark);
   border: 1px solid rgba(0,0,0,0.05);
   transition: all 0.3s;
@@ -1597,7 +1737,7 @@ onMounted(() => {
   align-items: center;
   gap: 0.6rem;
   padding: 0.6rem 1.25rem;
-  border-radius: var(--radius-full);
+  border-radius: 10px;
   color: var(--text-dark);
   font-weight: 600;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -1619,7 +1759,7 @@ onMounted(() => {
   height: 22px;
   min-width: 22px;
   padding: 0 6px;
-  border-radius: 11px;
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1770,7 +1910,7 @@ onMounted(() => {
 
 /* ================= MENU & BUNDLES ================= */
 .menu-section {
-  padding-top: 6rem;
+  padding-top: 2rem;
 }
 .section-header {
   text-align: center;
@@ -1794,14 +1934,14 @@ onMounted(() => {
   display: flex;
   background: white;
   padding: 0.5rem;
-  border-radius: var(--radius-full);
+  border-radius: 10px;
   box-shadow: 0 4px 15px rgba(0,0,0,0.05);
   gap: 0.25rem;
   border: 1px solid var(--border);
 }
 .cat-pill {
   padding: 0.8rem 1.8rem;
-  border-radius: var(--radius-full);
+  border-radius: 10px;
   font-weight: 700;
   color: var(--text-light);
   transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
@@ -1833,7 +1973,7 @@ onMounted(() => {
   padding: 1.2rem 2.5rem;
   font-size: 1.1rem;
   font-weight: 700;
-  border-radius: var(--radius-full);
+  border-radius: 10px;
 }
 
 .center-header { text-align: center; }
@@ -1871,7 +2011,7 @@ onMounted(() => {
   background: white;
   border-radius: var(--radius-lg);
   overflow: hidden;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.03);
+  box-shadow: 0 6px 16px rgba(0,0,0,0.08);
   border: 1px solid rgba(0,0,0,0.02);
   transition: transform 0.3s, box-shadow 0.3s;
   display: flex;
@@ -1905,7 +2045,7 @@ onMounted(() => {
   font-size: 0.75rem;
   font-weight: 800;
   padding: 0.4rem 0.8rem;
-  border-radius: var(--radius-full);
+  border-radius: 10px;
   z-index: 10;
   box-shadow: var(--shadow-sm);
   text-transform: uppercase;
@@ -1928,6 +2068,7 @@ onMounted(() => {
   flex: 1;
   display: -webkit-box;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
@@ -1941,7 +2082,7 @@ onMounted(() => {
   color: var(--text-dark);
   width: 44px;
   height: 44px;
-  border-radius: var(--radius-full);
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2015,7 +2156,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   background: #f1f5f9;
-  border-radius: var(--radius-full);
+  border-radius: 10px;
   padding: 4px 6px;
   border: 1px solid var(--border);
   width: fit-content;
@@ -2024,7 +2165,7 @@ onMounted(() => {
 .qty-btn {
   width: 26px;
   height: 26px;
-  border-radius: 50%;
+  border-radius: 10pc;
   background: white;
   display: flex;
   align-items: center;
@@ -2054,7 +2195,7 @@ onMounted(() => {
   background: var(--primary);
   color: white;
   padding: 0.45rem 1rem;
-  border-radius: var(--radius-full);
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2148,7 +2289,7 @@ onMounted(() => {
   width: 100%;
   padding: 1rem;
   font-size: 1rem;
-  border-radius: var(--radius-full);
+  border-radius: 10px;
 }
 
 
@@ -2166,7 +2307,7 @@ onMounted(() => {
 }
 .food-detail-modal {
   background: white;
-  border-radius: var(--radius-lg);
+  border-radius: 10px;
   width: 95%;
   max-width: 850px;
   display: flex;
@@ -2177,10 +2318,25 @@ onMounted(() => {
 }
 
 @media (max-width: 768px) {
+  .food-detail-overlay {
+    align-items: flex-end !important;
+    padding: 0 !important;
+  }
   .food-detail-modal {
     flex-direction: column;
-    max-width: 420px;
+    max-width: 100% !important;
+    width: 100% !important;
+    margin: 0 !important;
+    border-radius: 0 !important;
+    max-height: 95vh;
+    overflow-y: auto;
+    animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) !important;
   }
+}
+
+@keyframes slideUp {
+  0% { transform: translateY(100%); opacity: 0; }
+  100% { transform: translateY(0); opacity: 1; }
 }
 
 @keyframes scaleUp {
@@ -2195,7 +2351,7 @@ onMounted(() => {
   height: 36px;
   background: rgba(255, 255, 255, 0.8);
   color: var(--text-dark);
-  border-radius: 50%;
+  border-radius: 10px;
   font-size: 24px;
   display: flex;
   align-items: center;
@@ -2607,6 +2763,38 @@ onMounted(() => {
   outline: none;
   border-color: var(--primary);
   box-shadow: 0 0 0 4px var(--secondary);
+}
+.order-type-options {
+  display: flex;
+  gap: 1rem;
+}
+.order-type-card {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  border: 2px solid rgba(0,0,0,0.05);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all 0.2s;
+  font-weight: 700;
+}
+.order-type-card:hover {
+  background: var(--bg);
+}
+.order-type-card.selected {
+  border-color: var(--primary);
+  background: var(--secondary);
+  color: var(--primary);
+}
+.order-type-card input {
+  display: none;
+}
+.checkout-form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
 }
 .checkout-title-with-icon {
   display: flex;
@@ -3274,7 +3462,7 @@ onMounted(() => {
   }
   
   .menu-card {
-    border-radius: 18px !important;
+    border-radius: var(--radius-lg) !important;
     aspect-ratio: auto;
   }
 
@@ -3303,20 +3491,34 @@ onMounted(() => {
   .card-footer-modern {
     padding-top: 0.5rem !important;
     border-top: none !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 0.5rem !important;
   }
 
   .price-small {
-    font-size: 0.6rem !important;
-    margin-bottom: 0 !important;
+    display: none !important;
   }
 
   .price-val {
-    font-size: 0.95rem !important;
-    font-weight: 900 !important;
+    font-size: 0.85rem !important;
+    font-weight: 700 !important;
+  }
+
+  .card-actions {
+    width: 100%;
   }
 
   .add-to-cart-btn {
-    display: none !important;
+    width: 100%;
+    padding: 0.4rem;
+    font-size: 0.85rem;
+    border-radius: var(--radius-sm);
+  }
+
+  .qty-controls-inline {
+    width: 100%;
+    justify-content: space-between;
   }
 
   .rating-badge {
@@ -3431,14 +3633,19 @@ onMounted(() => {
     padding: 0.3rem;
   }
   
-  /* Fix Modal Sizing & Layout */
+  /* Fix Overlay & Modal Sizing - Updated to Bottom Sheet */
+  .modal-overlay.food-detail-overlay {
+    align-items: flex-end !important;
+    padding: 0 !important;
+  }
   .food-detail-modal {
     flex-direction: column !important;
-    max-height: 85vh !important;
-    width: 92% !important;
-    max-width: 380px !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    margin: 0 !important;
+    border-radius: 0 !important;
+    max-height: 95vh;
     overflow-y: auto;
-    border-radius: 24px !important;
   }
   .modal-img-wrapper {
     height: 180px !important;
@@ -3637,6 +3844,258 @@ onMounted(() => {
   }
 }
 
+/* INLINE QTY CONTROLS FOR CARDS */
+.qty-controls-inline {
+  display: flex;
+  align-items: center;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  height: 36px;
+}
+.qty-controls-inline.small {
+  height: 28px;
+}
+.qty-controls-inline .qty-btn {
+  width: 32px;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  background: #f8fafc;
+  color: var(--text);
+  transition: background 0.2s;
+}
+.qty-controls-inline.small .qty-btn {
+  width: 24px;
+}
+.qty-controls-inline .qty-btn:hover {
+  background: var(--primary);
+  color: white;
+}
+.qty-controls-inline .qty-num {
+  padding: 0 10px;
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: var(--text-dark);
+}
+
+/* SIDEBAR CART ANIMATION AND STYLES */
+.cart-sidebar-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.4);
+  backdrop-filter: blur(4px);
+  z-index: 999;
+}
+.cart-sidebar {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 100%;
+  max-width: 400px;
+  height: 100vh;
+  background: white;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  box-shadow: -10px 0 30px rgba(0, 0, 0, 0.1);
+}
+.cart-sidebar-header {
+  padding: 1.5rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+}
+.sidebar-header-title-group {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.clear-cart-btn {
+  color: var(--text-light);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.2s;
+}
+.clear-cart-btn:hover {
+  color: #ef4444;
+}
+.cart-sidebar-header h3 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+.close-sidebar {
+  font-size: 2rem;
+  color: var(--text-light);
+  line-height: 1;
+}
+.close-sidebar:hover {
+  color: var(--primary);
+}
+.cart-sidebar-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1.5rem;
+}
+.cart-sidebar-empty {
+  text-align: center;
+  color: var(--text-light);
+  margin-top: 50%;
+  transform: translateY(-50%);
+}
+.cart-sidebar-empty .empty-icon {
+  font-size: 3rem;
+  margin-bottom: 1rem;
+}
+.cart-sidebar-item {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  align-items: center;
+}
+.sidebar-item-img {
+  width: 70px;
+  height: 70px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+.sidebar-item-details {
+  flex: 1;
+}
+.sidebar-item-details h4 {
+  font-size: 0.95rem;
+  margin-bottom: 0.25rem;
+}
+.sidebar-item-price {
+  font-size: 0.9rem;
+  color: var(--primary);
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+}
+.sidebar-item-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.cart-sidebar-footer {
+  padding: 1.5rem;
+  border-top: 1px solid var(--border);
+  background: #f8fafc;
+}
+.sidebar-total {
+  display: flex;
+  justify-content: space-between;
+  font-weight: 800;
+  font-size: 1.2rem;
+  margin-bottom: 1rem;
+}
+.sidebar-total .total-val {
+  color: var(--primary);
+}
+
+/* Slide right transition */
+.slide-right-enter-active,
+.slide-right-leave-active {
+  transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.slide-right-enter-from,
+.slide-right-leave-to {
+  transform: translateX(100%);
+}
+.slide-right-enter-to,
+.slide-right-leave-from {
+  transform: translateX(0);
+}
+
+/* MODERN FOOTER STYLES */
+.modern-footer {
+  background: white;
+  color: var(--text);
+  padding: 4rem 0 0 0;
+  margin-top: 4rem;
+  border-top: 1px solid var(--border);
+}
+.footer-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr;
+  gap: 3rem;
+  margin-bottom: 3rem;
+}
+.footer-logo {
+  max-width: 150px;
+  margin-bottom: 1rem;
+  /* Force brand red color */
+  filter: brightness(0) saturate(100%) invert(18%) sepia(95%) saturate(3475%) hue-rotate(352deg) brightness(88%) contrast(92%);
+}
+.footer-brand p {
+  color: var(--text-light);
+  font-size: 0.95rem;
+  max-width: 300px;
+}
+
+.contact-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+.contact-item p {
+  margin-bottom: 0;
+  color: var(--text-light);
+  font-size: 0.95rem;
+}
+.contact-icon {
+  color: var(--primary);
+  flex-shrink: 0;
+}
+.footer-instagram {
+  width: 26px;
+  height: 26px;
+  margin-top: -3px;
+  /* Force brand red color */
+  filter: brightness(0) saturate(100%) invert(18%) sepia(95%) saturate(3475%) hue-rotate(352deg) brightness(88%) contrast(92%);
+}
+
+.footer-links h4,
+.footer-contact h4 {
+  color: var(--text-dark);
+  margin-bottom: 1.5rem;
+  font-size: 1.1rem;
+}
+.footer-links a {
+  display: block;
+  color: var(--text-light);
+  margin-bottom: 0.75rem;
+  transition: color 0.2s;
+}
+.footer-links a:hover {
+  color: var(--primary);
+}
+.footer-contact p {
+  color: var(--text-light);
+  margin-bottom: 0.75rem;
+  font-size: 0.95rem;
+}
+.footer-bottom {
+  text-align: center;
+  padding: 1.5rem;
+  border-top: 1px solid var(--border);
+  color: var(--text-light);
+  font-size: 0.85rem;
+}
+
+@media (max-width: 768px) {
+  .footer-grid {
+    grid-template-columns: 1fr;
+    gap: 2rem;
+  }
+}
 </style>
 
 
